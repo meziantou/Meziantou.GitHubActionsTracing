@@ -21,7 +21,7 @@ internal static class CliApplication
 
         var formatOption = new Option<ExportFormat?>("--format")
         {
-            Description = "Output format: otel, otel-file, chromium, speedscope",
+            Description = "Output format: otel, otel-file, chromium, speedscope, html",
             CustomParser = ParseExportFormat,
         };
 
@@ -52,6 +52,12 @@ internal static class CliApplication
         var speedscopePathOption = new Option<FullPath?>("--speedscope-path")
         {
             Description = "Export trace to Speedscope format file",
+            CustomParser = ParseNullableFullPath,
+        };
+
+        var htmlPathOption = new Option<FullPath?>("--html-path")
+        {
+            Description = "Export trace to HTML file with interactive swimlanes",
             CustomParser = ParseNullableFullPath,
         };
 
@@ -125,6 +131,7 @@ internal static class CliApplication
         exportCommand.Options.Add(otelPathOption);
         exportCommand.Options.Add(chromiumPathOption);
         exportCommand.Options.Add(speedscopePathOption);
+        exportCommand.Options.Add(htmlPathOption);
         exportCommand.Options.Add(minimumTestDurationOption);
         exportCommand.Options.Add(minimumBinlogDurationOption);
         exportCommand.Options.Add(includeBinlogOption);
@@ -141,6 +148,7 @@ internal static class CliApplication
                 var otelPath = parseResult.GetValue(otelPathOption);
                 var chromiumPath = parseResult.GetValue(chromiumPathOption);
                 var speedscopePath = parseResult.GetValue(speedscopePathOption);
+                var htmlPath = parseResult.GetValue(htmlPathOption);
                 var minimumTestDuration = parseResult.GetValue(minimumTestDurationOption);
                 var minimumBinlogDuration = parseResult.GetValue(minimumBinlogDurationOption);
                 var includeBinlog = parseResult.GetValue(includeBinlogOption);
@@ -159,6 +167,7 @@ internal static class CliApplication
                     OtelPath: otelPath,
                     ChromiumPath: chromiumPath,
                     SpeedscopePath: speedscopePath,
+                    HtmlPath: htmlPath,
                     MinimumTestDuration: minimumTestDuration,
                     MinimumBinlogDuration: minimumBinlogDuration,
                     IncludeBinlog: includeBinlog,
@@ -266,6 +275,11 @@ internal static class CliApplication
             exporters.Add(new SpeedscopeTraceExporter(options.SpeedscopePath.Value));
         }
 
+        if (options.HtmlPath is not null)
+        {
+            exporters.Add(new HtmlTraceExporter(options.HtmlPath.Value));
+        }
+
         if (!string.IsNullOrWhiteSpace(options.OtelEndpoint) || options.OtelPath is not null)
         {
             exporters.Add(new OpenTelemetryTraceExporter(options.OtelEndpoint, options.OtelProtocol, options.OtelPath));
@@ -337,7 +351,8 @@ internal static class CliApplication
             "OTEL-FILE" => ExportFormat.OtelFile,
             "CHROMIUM" => ExportFormat.Chromium,
             "SPEEDSCOPE" => ExportFormat.Speedscope,
-            _ => SetError<ExportFormat?>(result, "Invalid format. Allowed values: otel, otel-file, chromium, speedscope"),
+            "HTML" => ExportFormat.Html,
+            _ => SetError<ExportFormat?>(result, "Invalid format. Allowed values: otel, otel-file, chromium, speedscope, html"),
         };
     }
 

@@ -402,6 +402,9 @@ internal sealed partial class TraceModel
                 if (target.Name.StartsWith('_'))
                     continue;
 
+                if (string.Equals(target.Name, "CallTarget", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
                 if (target.Duration < minimumBinlogDuration)
                     continue;
 
@@ -419,8 +422,10 @@ internal sealed partial class TraceModel
                     parentId = projectSpan.Id;
                 }
 
+                var targetName = BuildMsBuildNodeName(target.Name, project);
+
                 var targetSpan = AddSpan(
-                    name: target.Name,
+                    name: targetName,
                     kind: "msbuild.target",
                     startTime: targetStart,
                     endTime: targetEnd,
@@ -431,6 +436,8 @@ internal sealed partial class TraceModel
                         ["artifact.id"] = artifact.Artifact.Id,
                         ["artifact.name"] = artifact.Artifact.Name,
                         ["binlog.file"] = file.Value,
+                            ["project.file"] = project?.ProjectFile,
+                            ["project.target_framework"] = project?.TargetFramework,
                         ["target.succeeded"] = target.Succeeded,
                     });
 
@@ -441,6 +448,9 @@ internal sealed partial class TraceModel
 
                 foreach (var task in EnumerateNodes<StructuredTask>(target))
                 {
+                    if (string.Equals(task.Name, "CallTarget", StringComparison.OrdinalIgnoreCase))
+                        continue;
+
                     if (task.StartTime == default || task.EndTime == default)
                         continue;
 
@@ -449,8 +459,10 @@ internal sealed partial class TraceModel
                     if (taskEnd < taskStart)
                         taskEnd = taskStart;
 
+                    var taskName = BuildMsBuildNodeName(task.Name ?? "Task", project);
+
                     AddSpan(
-                        name: task.Name ?? "Task",
+                        name: taskName,
                         kind: "msbuild.task",
                         startTime: taskStart,
                         endTime: taskEnd,
@@ -461,6 +473,8 @@ internal sealed partial class TraceModel
                             ["artifact.id"] = artifact.Artifact.Id,
                             ["artifact.name"] = artifact.Artifact.Name,
                             ["binlog.file"] = file.Value,
+                            ["project.file"] = project?.ProjectFile,
+                            ["project.target_framework"] = project?.TargetFramework,
                             ["task.from_assembly"] = task.FromAssembly,
                         });
                 }
@@ -488,6 +502,36 @@ internal sealed partial class TraceModel
             return Path.GetFileName(project.ProjectFile);
 
         return "Project";
+    }
+
+    private static string BuildMsBuildNodeName(string name, StructuredProject? project)
+    {
+        if (!string.Equals(name, "Csc", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(name, "Restore", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(name, "RestoreTask", StringComparison.OrdinalIgnoreCase))
+        {
+            return name;
+        }
+
+        var projectContext = GetProjectContext(project);
+        if (string.IsNullOrWhiteSpace(projectContext))
+            return name;
+
+        return $"{name} ({projectContext})";
+    }
+
+    private static string? GetProjectContext(StructuredProject? project)
+    {
+        if (project is null)
+            return null;
+
+        if (!string.IsNullOrWhiteSpace(project.ProjectFile))
+            return Path.GetFileName(project.ProjectFile);
+
+        if (!string.IsNullOrWhiteSpace(project.Name))
+            return project.Name;
+
+        return null;
     }
 
     private static bool TryGetBinlogFileFormatVersion(FullPath file, out int fileFormatVersion)

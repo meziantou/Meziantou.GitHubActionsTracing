@@ -64,12 +64,13 @@ public sealed class CliApplicationTests
               <workflow-run-url-or-folder>  URL of the GitHub Actions workflow run, a downloaded run-info folder, or a zip file
 
             Options:
-              --format <Chromium|Otel|OtelFile|Speedscope>                                    Output format: otel, otel-file, chromium, speedscope
+              --format <Chromium|Html|Otel|OtelFile|Speedscope>                               Output format: otel, otel-file, chromium, speedscope, html
               --otel-endpoint <otel-endpoint>                                                 OpenTelemetry collector endpoint
               --otel-protocol <Grpc|HttpProtobuf>                                             OpenTelemetry protocol: grpc, http, http/protobuf [default: Grpc]
               --otel-file-path, --otel-path <otel-path>                                       Export OpenTelemetry data to a file
               --chromium-path <chromium-path>                                                 Export trace to Chromium format file
               --speedscope-path <speedscope-path>                                             Export trace to Speedscope format file
+              --html-path <html-path>                                                         Export trace to HTML file with interactive swimlanes
               --minimum-test-duration <minimum-test-duration>                                 Exclude tests shorter than this duration (e.g. 00:00:01) [default: 00:00:00]
               --minimum-binlog-duration, --minimum-target-duration <minimum-binlog-duration>  Exclude binlog targets shorter than this duration (e.g. 00:00:01) [default: 00:00:00]
               --include-binlog                                                                Include MSBuild binlog targets/tasks in the trace
@@ -415,6 +416,41 @@ public sealed class CliApplicationTests
                 previousType = type;
             }
         }
+    }
+
+    [Fact]
+    public async Task EmbeddedFixture_BinlogSpanNames_AreContextualAndCallTargetFiltered()
+    {
+        await using var temporaryDirectory = TemporaryDirectory.Create();
+        var model = LoadEmbeddedFixtureModel(temporaryDirectory);
+
+        Assert.DoesNotContain(model.Spans, static span =>
+            span.Kind is "msbuild.target" or "msbuild.task"
+            && string.Equals(span.Name, "CallTarget", StringComparison.OrdinalIgnoreCase));
+
+        Assert.DoesNotContain(model.Spans, static span =>
+            span.Kind is "msbuild.target" or "msbuild.task"
+            && string.Equals(span.Name, "Csc", StringComparison.OrdinalIgnoreCase));
+
+        Assert.DoesNotContain(model.Spans, static span =>
+            span.Kind is "msbuild.target" or "msbuild.task"
+            && string.Equals(span.Name, "Restore", StringComparison.OrdinalIgnoreCase));
+
+        Assert.DoesNotContain(model.Spans, static span =>
+            span.Kind is "msbuild.task"
+            && string.Equals(span.Name, "RestoreTask", StringComparison.OrdinalIgnoreCase));
+
+        Assert.Contains(model.Spans, static span =>
+            span.Kind is "msbuild.target" or "msbuild.task"
+            && span.Name.StartsWith("Csc (", StringComparison.Ordinal));
+
+        Assert.Contains(model.Spans, static span =>
+            span.Kind is "msbuild.target" or "msbuild.task"
+            && span.Name.StartsWith("Restore (", StringComparison.Ordinal));
+
+        Assert.Contains(model.Spans, static span =>
+            span.Kind is "msbuild.task"
+            && span.Name.StartsWith("RestoreTask (", StringComparison.Ordinal));
     }
 
     private static void ExtractEmbeddedFixture(string fileName, FullPath outputDirectory)

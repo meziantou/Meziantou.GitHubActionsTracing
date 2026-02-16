@@ -12,6 +12,7 @@ internal sealed record ApplicationOptions(
     FullPath? OtelPath,
     FullPath? ChromiumPath,
     FullPath? SpeedscopePath,
+    FullPath? HtmlPath,
     TimeSpan MinimumTestDuration,
     TimeSpan MinimumBinlogDuration,
     bool IncludeBinlog,

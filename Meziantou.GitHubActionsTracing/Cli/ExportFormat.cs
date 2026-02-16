@@ -6,4 +6,5 @@ internal enum ExportFormat
     OtelFile,
     Chromium,
     Speedscope,
+    Html,
 }

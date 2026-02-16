@@ -8,7 +8,8 @@ internal sealed record ExportOptions(
     OtlpExportProtocol OtelProtocol,
     FullPath? OtelPath,
     FullPath? ChromiumPath,
-    FullPath? SpeedscopePath)
+    FullPath? SpeedscopePath,
+    FullPath? HtmlPath)
 {
     public static ExportOptions Create(TraceModel model, ApplicationOptions options)
     {
@@ -16,6 +17,7 @@ internal sealed record ExportOptions(
         var otelPath = options.OtelPath;
         var chromiumPath = options.ChromiumPath;
         var speedscopePath = options.SpeedscopePath;
+        var htmlPath = options.HtmlPath;
 
         if (options.Format is not null)
         {
@@ -32,19 +34,22 @@ internal sealed record ExportOptions(
                     otelPath ??= FullPath.FromPath($"trace-{model.WorkflowRunId}.otel.json");
                     break;
                 case ExportFormat.Chromium:
-                    chromiumPath ??= FullPath.FromPath(string.Create(CultureInfo.InvariantCulture, $"trace-{model.WorkflowRunId}.json"));
+                    chromiumPath ??= FullPath.FromPath(string.Create(CultureInfo.InvariantCulture, $"trace-{model.WorkflowRunId}.chromium.json"));
                     break;
                 case ExportFormat.Speedscope:
                     speedscopePath ??= FullPath.FromPath($"trace-{model.WorkflowRunId}.speedscope.json");
+                    break;
+                case ExportFormat.Html:
+                    htmlPath ??= FullPath.FromPath($"trace-{model.WorkflowRunId}.html");
                     break;
                 default:
                     throw new ArgumentOutOfRangeException(nameof(options), options.Format, "Unknown format");
             }
         }
 
-        if (otelPath is null && chromiumPath is null && speedscopePath is null && string.IsNullOrWhiteSpace(otelEndpoint))
+        if (otelPath is null && chromiumPath is null && speedscopePath is null && htmlPath is null && string.IsNullOrWhiteSpace(otelEndpoint))
         {
-            throw new InvalidOperationException("No exporter selected. Use --format, --otel-endpoint, --otel-path, --chromium-path, or --speedscope-path");
+            throw new InvalidOperationException("No exporter selected. Use --format, --otel-endpoint, --otel-path, --chromium-path, --speedscope-path, or --html-path");
         }
 
         return new ExportOptions(
@@ -52,6 +57,7 @@ internal sealed record ExportOptions(
             OtelProtocol: options.OtelProtocol,
             OtelPath: otelPath,
             ChromiumPath: chromiumPath,
-            SpeedscopePath: speedscopePath);
+            SpeedscopePath: speedscopePath,
+            HtmlPath: htmlPath);
     }
 }
