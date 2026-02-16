@@ -939,6 +939,9 @@ internal sealed partial class TraceModel
 
     private static void MapArtifactsToJobs(List<ArtifactContext> artifacts, List<WorkflowRunJob> jobs, Dictionary<long, string> logsByJob)
     {
+        var uploadArtifactNamesByJob = logsByJob
+            .ToDictionary(static entry => entry.Key, static entry => ExtractUploadArtifactNames(entry.Value));
+
         foreach (var artifact in artifacts)
         {
             long? bestJobId = null;
@@ -948,10 +951,15 @@ internal sealed partial class TraceModel
             {
                 var score = 0;
 
-                if (logsByJob.TryGetValue(job.Id, out var jobLog)
-                    && jobLog.Contains(artifact.Artifact.Name, StringComparison.OrdinalIgnoreCase))
+                if (uploadArtifactNamesByJob.TryGetValue(job.Id, out var uploadedArtifactNames)
+                    && uploadedArtifactNames.Contains(artifact.Artifact.Name))
                 {
-                    score += 10;
+                    score += 30;
+                }
+                else if (logsByJob.TryGetValue(job.Id, out var jobLog)
+                         && jobLog.Contains(artifact.Artifact.Name, StringComparison.OrdinalIgnoreCase))
+                {
+                    score += 6;
                 }
 
                 if (artifact.Artifact.CreatedAt is not null && job.StartedAt is not null && job.CompletedAt is not null)
@@ -999,6 +1007,86 @@ internal sealed partial class TraceModel
                 AppLog.Warning($"Cannot map artifact {artifact.Artifact.Id} ({artifact.Artifact.Name}) to a job");
             }
         }
+    }
+
+    private static HashSet<string> ExtractUploadArtifactNames(string jobLog)
+    {
+        var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var groups = new Stack<bool>();
+        var uploadArtifactGroupDepth = 0;
+        var inUploadArtifactWithSection = false;
+
+        foreach (var line in EnumerateLines(jobLog))
+        {
+            var (_, message) = ParseLogLine(line);
+            if (TryGetGroupStartTitle(message, out var title))
+            {
+                var isUploadArtifactGroup = title.Contains("actions/upload-artifact", StringComparison.OrdinalIgnoreCase);
+                groups.Push(isUploadArtifactGroup);
+                if (isUploadArtifactGroup)
+                {
+                    uploadArtifactGroupDepth++;
+                    inUploadArtifactWithSection = false;
+                }
+
+                continue;
+            }
+
+            if (IsGroupEnd(message))
+            {
+                if (groups.TryPop(out var endedUploadArtifactGroup) && endedUploadArtifactGroup)
+                {
+                    uploadArtifactGroupDepth--;
+                    inUploadArtifactWithSection = false;
+                }
+
+                continue;
+            }
+
+            if (uploadArtifactGroupDepth <= 0)
+                continue;
+
+            var trimmedMessage = message.Trim();
+            if (trimmedMessage.Equals("with:", StringComparison.OrdinalIgnoreCase))
+            {
+                inUploadArtifactWithSection = true;
+                continue;
+            }
+
+            if (trimmedMessage.Equals("env:", StringComparison.OrdinalIgnoreCase))
+            {
+                inUploadArtifactWithSection = false;
+                continue;
+            }
+
+            if (!inUploadArtifactWithSection)
+                continue;
+
+            if (TryGetUploadArtifactName(trimmedMessage, out var artifactName))
+                result.Add(artifactName);
+        }
+
+        return result;
+    }
+
+    private static bool TryGetUploadArtifactName(string message, out string artifactName)
+    {
+        artifactName = string.Empty;
+
+        var separatorIndex = message.IndexOf(':', StringComparison.Ordinal);
+        if (separatorIndex <= 0)
+            return false;
+
+        var key = message[..separatorIndex].Trim();
+        if (!key.Equals("name", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        var value = message[(separatorIndex + 1)..].Trim();
+        if (string.IsNullOrWhiteSpace(value))
+            return false;
+
+        artifactName = value;
+        return true;
     }
 
     private static TraceSpan? GetStepSpan(List<TraceSpan> stepSpans, DateTimeOffset? timestamp)

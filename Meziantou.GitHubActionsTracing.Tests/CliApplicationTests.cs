@@ -514,6 +514,23 @@ public sealed class CliApplicationTests
         Assert.True(secondGroup.StartTime < secondStep.StartTime);
     }
 
+    [Fact]
+    public async Task Load_MapsArtifactToUploadArtifactGroupJob()
+    {
+        await using var temporaryDirectory = TemporaryDirectory.Create();
+        var fixtureDirectory = temporaryDirectory / "fixture";
+        CreateRunInfoFixtureWithUploadArtifactGroup(fixtureDirectory);
+
+        var model = TraceModel.Load(fixtureDirectory, new TraceLoadOptions
+        {
+            IncludeTests = true,
+            MinimumTestDuration = TimeSpan.Zero,
+        });
+
+        var testSpan = model.Spans.Single(static span => span.Kind is "test");
+        Assert.Equal(1001, testSpan.JobId);
+    }
+
     private static void CreateRunInfoFixtureWithPreciseGroupOutsideStepDuration(FullPath fixtureDirectory)
     {
         var metadataDirectory = fixtureDirectory / "metadata";
@@ -578,6 +595,116 @@ public sealed class CliApplicationTests
                         2026-02-16T00:00:02.1500000Z ::endgroup::
                         2026-02-16T00:00:02.0500000Z ::group::Group currently mapped to next step
                         2026-02-16T00:00:02.0600000Z ::endgroup::
+                        """);
+    }
+
+    private static void CreateRunInfoFixtureWithUploadArtifactGroup(FullPath fixtureDirectory)
+    {
+        var metadataDirectory = fixtureDirectory / "metadata";
+        var logsDirectory = fixtureDirectory / "logs" / "jobs";
+        var artifactDirectory = fixtureDirectory / "artifacts" / "5001-build-tests-artifacts" / "files";
+
+        Directory.CreateDirectory(metadataDirectory);
+        Directory.CreateDirectory(logsDirectory);
+        Directory.CreateDirectory(artifactDirectory);
+
+        File.WriteAllText(metadataDirectory / "run.json", """
+                        {
+                            "id": 42,
+                            "name": "Sample workflow",
+                            "created_at": "2026-02-16T00:00:00Z",
+                            "run_started_at": "2026-02-16T00:00:00Z",
+                            "updated_at": "2026-02-16T00:12:00Z"
+                        }
+                        """);
+
+        File.WriteAllText(metadataDirectory / "jobs.json", """
+                        {
+                            "jobs": [
+                                {
+                                    "id": 1001,
+                                    "run_id": 42,
+                                    "name": "build",
+                                    "status": "completed",
+                                    "conclusion": "success",
+                                    "created_at": "2026-02-16T00:00:00Z",
+                                    "started_at": "2026-02-16T00:00:00Z",
+                                    "completed_at": "2026-02-16T00:02:00Z",
+                                    "steps": [
+                                        {
+                                            "number": 1,
+                                            "name": "upload artifact",
+                                            "status": "completed",
+                                            "conclusion": "success",
+                                            "started_at": "2026-02-16T00:00:00Z",
+                                            "completed_at": "2026-02-16T00:02:00Z"
+                                        }
+                                    ]
+                                },
+                                {
+                                    "id": 1002,
+                                    "run_id": 42,
+                                    "name": "publish",
+                                    "status": "completed",
+                                    "conclusion": "success",
+                                    "created_at": "2026-02-16T00:10:00Z",
+                                    "started_at": "2026-02-16T00:10:00Z",
+                                    "completed_at": "2026-02-16T00:12:00Z",
+                                    "steps": [
+                                        {
+                                            "number": 1,
+                                            "name": "post processing",
+                                            "status": "completed",
+                                            "conclusion": "success",
+                                            "started_at": "2026-02-16T00:10:00Z",
+                                            "completed_at": "2026-02-16T00:12:00Z"
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                        """);
+
+        File.WriteAllText(metadataDirectory / "artifacts.json", """
+                        {
+                            "artifacts": [
+                                {
+                                    "id": 5001,
+                                    "name": "build-tests-artifacts",
+                                    "size_in_bytes": 1024,
+                                    "created_at": "2026-02-16T00:10:30Z",
+                                    "updated_at": "2026-02-16T00:10:30Z"
+                                }
+                            ]
+                        }
+                        """);
+
+        File.WriteAllText(logsDirectory / "1001.log", """
+                        2026-02-16T00:01:00.0000000Z ##[group]Run actions/upload-artifact@v6
+                        2026-02-16T00:01:00.0000100Z with:
+                        2026-02-16T00:01:00.0000200Z   name: build-tests-artifacts
+                        2026-02-16T00:01:00.0000300Z   path: ./artifacts/test-results/**/*.trx
+                        2026-02-16T00:01:00.0000400Z env:
+                        2026-02-16T00:01:00.0000500Z   DOTNET_NOLOGO: true
+                        2026-02-16T00:01:00.0000600Z ##[endgroup]
+                        """);
+
+        File.WriteAllText(logsDirectory / "1002.log", """
+                        2026-02-16T00:11:00.0000000Z Processing build-tests-artifacts metadata
+                        """);
+
+        File.WriteAllText(artifactDirectory / "results.trx", """
+                        <?xml version="1.0" encoding="utf-8"?>
+                        <TestRun>
+                          <Results>
+                            <UnitTestResult testName="SampleTests.UploadedArtifactIsMapped"
+                                            outcome="Passed"
+                                            duration="00:00:01"
+                                            startTime="2026-02-16T00:01:20.0000000Z"
+                                            endTime="2026-02-16T00:01:21.0000000Z"
+                                            machineName="runner-1" />
+                          </Results>
+                        </TestRun>
                         """);
     }
 
