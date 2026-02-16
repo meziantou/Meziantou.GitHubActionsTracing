@@ -419,6 +419,33 @@ public sealed class CliApplicationTests
     }
 
     [Fact]
+    public async Task EmbeddedFixture_GeneratesHtmlWithPanAndZoomWheelControls()
+    {
+        await using var temporaryDirectory = TemporaryDirectory.Create();
+        var model = LoadEmbeddedFixtureModel(temporaryDirectory);
+
+        var outputPath = temporaryDirectory / "nested" / "trace.html";
+        await new HtmlTraceExporter(outputPath).ExportAsync(model);
+
+        Assert.True(File.Exists(outputPath));
+
+        var fileContent = await File.ReadAllTextAsync(outputPath, TestContext.Current.CancellationToken);
+        Assert.Contains("if (e.ctrlKey || e.metaKey)", fileContent, StringComparison.Ordinal);
+        Assert.Contains("panX -= horizontalDelta;", fileContent, StringComparison.Ordinal);
+        Assert.Contains("panY -= verticalDelta;", fileContent, StringComparison.Ordinal);
+        Assert.Contains("function clampPan()", fileContent, StringComparison.Ordinal);
+        Assert.Contains("const minPanX = timelineWidth - dataWidth;", fileContent, StringComparison.Ordinal);
+        Assert.Contains("const minPanY = viewportLaneHeight - dataHeight;", fileContent, StringComparison.Ordinal);
+        Assert.Contains("Show MSBuild Targets", fileContent, StringComparison.Ordinal);
+        Assert.Contains("Show MSBuild Tasks", fileContent, StringComparison.Ordinal);
+        Assert.Contains("Show Tests", fileContent, StringComparison.Ordinal);
+        Assert.Contains("function isSpanVisibleByFilters(span)", fileContent, StringComparison.Ordinal);
+        Assert.Contains("span.kind === 'msbuild.target'", fileContent, StringComparison.Ordinal);
+        Assert.Contains("span.kind === 'msbuild.task'", fileContent, StringComparison.Ordinal);
+        Assert.Contains("span.kind === 'test'", fileContent, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task EmbeddedFixture_BinlogSpanNames_AreContextualAndCallTargetFiltered()
     {
         await using var temporaryDirectory = TemporaryDirectory.Create();
@@ -451,6 +478,107 @@ public sealed class CliApplicationTests
         Assert.Contains(model.Spans, static span =>
             span.Kind is "msbuild.task"
             && span.Name.StartsWith("RestoreTask (", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Load_RecomputesJobAndStepDurationsFromChildren()
+    {
+        await using var temporaryDirectory = TemporaryDirectory.Create();
+        var fixtureDirectory = temporaryDirectory / "fixture";
+        CreateRunInfoFixtureWithPreciseGroupOutsideStepDuration(fixtureDirectory);
+
+        var model = TraceModel.Load(fixtureDirectory);
+
+        var job = model.Spans.Single(static span => span.Kind is "job");
+        var steps = model.Spans
+            .Where(static span => span.Kind is "step")
+            .OrderBy(static span => span.Attributes.TryGetValue("step.number", out var value) && value is int stepNumber ? stepNumber : int.MaxValue)
+            .ToList();
+        var groups = model.Spans
+            .Where(static span => span.Kind is "log.group")
+            .ToList();
+
+        Assert.Equal(2, steps.Count);
+        Assert.Equal(2, groups.Count);
+
+        var firstStep = steps[0];
+        var secondStep = steps[1];
+        var firstGroup = groups.Single(static span => span.Name == "Precise log group");
+        var secondGroup = groups.Single(static span => span.Name == "Group currently mapped to next step");
+
+        Assert.Equal(firstStep.Id, firstGroup.ParentId);
+        Assert.Equal(firstGroup.EndTime, firstStep.EndTime);
+        Assert.Equal(firstStep.EndTime, secondStep.StartTime);
+        Assert.Equal(secondStep.EndTime, job.EndTime);
+        Assert.True(firstStep.StartTime <= firstGroup.StartTime);
+        Assert.True(secondGroup.StartTime < secondStep.StartTime);
+    }
+
+    private static void CreateRunInfoFixtureWithPreciseGroupOutsideStepDuration(FullPath fixtureDirectory)
+    {
+        var metadataDirectory = fixtureDirectory / "metadata";
+        var logsDirectory = fixtureDirectory / "logs" / "jobs";
+
+        Directory.CreateDirectory(metadataDirectory);
+        Directory.CreateDirectory(logsDirectory);
+
+        File.WriteAllText(metadataDirectory / "run.json", """
+                        {
+                            "id": 42,
+                            "name": "Sample workflow",
+                            "created_at": "2026-02-16T00:00:00Z",
+                            "run_started_at": "2026-02-16T00:00:00Z",
+                            "updated_at": "2026-02-16T00:00:03Z"
+                        }
+                        """);
+
+        File.WriteAllText(metadataDirectory / "jobs.json", """
+                        {
+                            "jobs": [
+                                {
+                                    "id": 1001,
+                                    "run_id": 42,
+                                    "name": "build",
+                                    "status": "completed",
+                                    "conclusion": "success",
+                                    "created_at": "2026-02-16T00:00:00Z",
+                                    "started_at": "2026-02-16T00:00:00Z",
+                                    "completed_at": "2026-02-16T00:00:03Z",
+                                    "steps": [
+                                        {
+                                            "number": 1,
+                                            "name": "build step",
+                                            "status": "completed",
+                                            "conclusion": "success",
+                                            "started_at": "2026-02-16T00:00:01Z",
+                                            "completed_at": "2026-02-16T00:00:02Z"
+                                        },
+                                        {
+                                            "number": 2,
+                                            "name": "test step",
+                                            "status": "completed",
+                                            "conclusion": "success",
+                                            "started_at": "2026-02-16T00:00:02Z",
+                                            "completed_at": "2026-02-16T00:00:03Z"
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                        """);
+
+        File.WriteAllText(metadataDirectory / "artifacts.json", """
+                        {
+                            "artifacts": []
+                        }
+                        """);
+
+        File.WriteAllText(logsDirectory / "1001.log", """
+                        2026-02-16T00:00:01.9000000Z ::group::Precise log group
+                        2026-02-16T00:00:02.1500000Z ::endgroup::
+                        2026-02-16T00:00:02.0500000Z ::group::Group currently mapped to next step
+                        2026-02-16T00:00:02.0600000Z ::endgroup::
+                        """);
     }
 
     private static void ExtractEmbeddedFixture(string fileName, FullPath outputDirectory)

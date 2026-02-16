@@ -258,5 +258,4 @@ internal static class GitHubRunDownloader
 
         return value[..maxLength] + "...";
     }
-
 }

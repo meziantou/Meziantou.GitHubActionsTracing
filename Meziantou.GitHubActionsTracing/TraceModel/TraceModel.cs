@@ -146,6 +146,10 @@ internal sealed partial class TraceModel
                 stepSpans: stepsByJob.TryGetValue(job.Id, out var value) ? value : []);
         }
 
+        // Jobs and steps from the GitHub API have 1-second precision, while logs contains the full datetime.
+        // So, some spans may be outside of their parents (up to 1 second).
+        model.RecomputeJobAndStepDurationsFromChildren();
+
         var artifactContexts = BuildArtifactContexts(path, artifactsResponse.Artifacts ?? []);
         MapArtifactsToJobs(artifactContexts, jobs, logsByJob);
 
@@ -170,6 +174,8 @@ internal sealed partial class TraceModel
                 model.AddTestSpans(artifact, options.MinimumTestDuration);
             }
         }
+
+        model.RecomputeJobAndStepDurationsFromChildren();
 
         return model;
     }
@@ -249,6 +255,85 @@ internal sealed partial class TraceModel
         }
 
         return depth;
+    }
+
+    private void RecomputeJobAndStepDurationsFromChildren()
+    {
+        var childrenByParentId = _spans
+            .Where(static span => span.ParentId is not null)
+            .GroupBy(span => span.ParentId!, StringComparer.Ordinal)
+            .ToDictionary(static group => group.Key, static group => group.ToList(), StringComparer.Ordinal);
+
+        ExpandJobAndStepDurationsFromChildren(childrenByParentId, adjustStepStartTime: true);
+        AdjustFollowingStepStartTimes();
+        ExpandJobAndStepDurationsFromChildren(childrenByParentId, adjustStepStartTime: false);
+        AdjustFollowingStepStartTimes();
+    }
+
+    private void ExpandJobAndStepDurationsFromChildren(Dictionary<string, List<TraceSpan>> childrenByParentId, bool adjustStepStartTime)
+    {
+        var spansToRecompute = _spans
+            .Where(static span => span.Kind is "job" or "step")
+            .OrderByDescending(GetDepth)
+            .ToList();
+
+        foreach (var span in spansToRecompute)
+        {
+            if (!childrenByParentId.TryGetValue(span.Id, out var children))
+                continue;
+
+            var minStart = span.StartTime;
+            var maxEnd = span.EndTime;
+            foreach (var child in children)
+            {
+                if ((adjustStepStartTime || span.Kind == "job") && child.StartTime < minStart)
+                    minStart = child.StartTime;
+
+                if (child.EndTime > maxEnd)
+                    maxEnd = child.EndTime;
+            }
+
+            span.StartTime = minStart;
+            span.EndTime = maxEnd;
+        }
+    }
+
+    private void AdjustFollowingStepStartTimes()
+    {
+        var stepsByJob = _spans
+            .Where(static span => span.Kind == "step" && span.JobId is not null)
+            .GroupBy(span => span.JobId!.Value)
+            .ToList();
+
+        foreach (var stepGroup in stepsByJob)
+        {
+            var orderedSteps = stepGroup
+                .OrderBy(GetStepNumber)
+                .ThenBy(static span => span.StartTime)
+                .ToList();
+
+            DateTimeOffset? previousEndTime = null;
+            foreach (var step in orderedSteps)
+            {
+                if (previousEndTime is not null && step.StartTime < previousEndTime.Value)
+                {
+                    step.StartTime = previousEndTime.Value;
+                }
+
+                if (step.EndTime < step.StartTime)
+                    step.EndTime = step.StartTime;
+
+                previousEndTime = step.EndTime;
+            }
+        }
+    }
+
+    private static int GetStepNumber(TraceSpan span)
+    {
+        if (span.Attributes.TryGetValue("step.number", out var value) && value is int stepNumber)
+            return stepNumber;
+
+        return int.MaxValue;
     }
 
     private void ParseJobLog(long jobId, string logContent, List<TraceSpan> stepSpans)

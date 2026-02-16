@@ -62,13 +62,17 @@ internal sealed class HtmlTraceExporter : ITraceExporter
         html.AppendLine("    </style>");
         html.AppendLine("</head>");
         html.AppendLine("<body>");
-        html.AppendLine("    <div class=\"header\">");
+        html.AppendLine("    <div id=\"header\" class=\"header\">");
         html.AppendLine($"        <h1>{HtmlEncode(model.WorkflowRun.Name ?? "Workflow Run")}</h1>");
         html.AppendLine(CultureInfo.InvariantCulture, $"        <div class=\"info\">Duration: {FormatDuration((maxTime - minTime).TotalMilliseconds)} | Idle: {idleDurationSeconds:F1}s ({idlePercentage:P1}) | Spans: {spans.Count} | Jobs: {jobs.Count}</div>");
         html.AppendLine("        <div class=\"header-controls\">");
         html.AppendLine("            <label for=\"search\">Search:</label>");
         html.AppendLine("            <input id=\"search\" class=\"search-input\" type=\"text\" placeholder=\"Span name contains...\" autocomplete=\"off\" />");
         html.AppendLine("            <span id=\"search-status\" class=\"search-status\"></span>");
+        html.AppendLine("            <span class=\"filters-separator\" aria-hidden=\"true\">|</span>");
+        html.AppendLine("            <label class=\"filter-option\" for=\"filter-msbuild-targets\"><input id=\"filter-msbuild-targets\" type=\"checkbox\" checked /> Show MSBuild Targets</label>");
+        html.AppendLine("            <label class=\"filter-option\" for=\"filter-msbuild-tasks\"><input id=\"filter-msbuild-tasks\" type=\"checkbox\" checked /> Show MSBuild Tasks</label>");
+        html.AppendLine("            <label class=\"filter-option\" for=\"filter-tests\"><input id=\"filter-tests\" type=\"checkbox\" checked /> Show Tests</label>");
         html.AppendLine("        </div>");
         html.AppendLine("    </div>");
         html.AppendLine("    <div id=\"container\">");
@@ -210,6 +214,9 @@ internal sealed class HtmlTraceExporter : ITraceExporter
     private static string GetCss()
     {
         return @"
+        :root {
+            --header-height: 140px;
+        }
         * {
             margin: 0;
             padding: 0;
@@ -239,6 +246,7 @@ internal sealed class HtmlTraceExporter : ITraceExporter
             display: flex;
             align-items: center;
             gap: 8px;
+            flex-wrap: wrap;
             color: #cccccc;
             font-size: 13px;
         }
@@ -259,13 +267,29 @@ internal sealed class HtmlTraceExporter : ITraceExporter
             color: #9cdcfe;
             min-width: 90px;
         }
+        .filters-separator {
+            color: #4f4f55;
+        }
+        .filter-option {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            color: #cccccc;
+            user-select: none;
+            white-space: nowrap;
+            cursor: pointer;
+        }
+        .filter-option input {
+            accent-color: #3794ff;
+            cursor: pointer;
+        }
         #container {
             position: absolute;
-            top: 140px;
+            top: var(--header-height);
             left: 0;
             right: 0;
             bottom: 0;
-            overflow: auto;
+            overflow: hidden;
             cursor: grab;
         }
         #container:active {
@@ -303,12 +327,16 @@ internal sealed class HtmlTraceExporter : ITraceExporter
     private static string GetJavaScript()
     {
         return @"
+        const header = document.getElementById('header');
         const container = document.getElementById('container');
         const canvas = document.getElementById('canvas');
         const ctx = canvas.getContext('2d');
         const tooltip = document.getElementById('tooltip');
         const searchInput = document.getElementById('search');
         const searchStatus = document.getElementById('search-status');
+        const filterMsbuildTargetsInput = document.getElementById('filter-msbuild-targets');
+        const filterMsbuildTasksInput = document.getElementById('filter-msbuild-tasks');
+        const filterTestsInput = document.getElementById('filter-tests');
 
         const ROW_HEIGHT = 16;
         const ROW_PADDING = 2;
@@ -317,6 +345,8 @@ internal sealed class HtmlTraceExporter : ITraceExporter
         const LEFT_MARGIN = 200;
         const TOP_MARGIN = 60;
         const MIN_SPAN_WIDTH = 2;
+        const ZOOM_MIN = 0.1;
+        const ZOOM_MAX = 50;
 
         let zoom = 1;
         let panX = 0;
@@ -327,6 +357,9 @@ internal sealed class HtmlTraceExporter : ITraceExporter
         let hoveredSpan = null;
         let searchTerm = '';
         let matchedSpanIds = null;
+        let showMsbuildTargets = true;
+        let showMsbuildTasks = true;
+        let showTests = true;
 
         const kindColors = {
             'workflow': '#3794ff',
@@ -402,31 +435,88 @@ internal sealed class HtmlTraceExporter : ITraceExporter
                 laneOffsets,
                 spanRows,
                 spanVariants,
-                totalHeight: TOP_MARGIN + offset + 100,
+                contentHeight: offset,
             };
         }
 
         const layout = buildLayout();
 
+        function getDpr() {
+            return window.devicePixelRatio || 1;
+        }
+
+        function updateHeaderHeight() {
+            const headerHeight = header
+                ? Math.max(100, Math.ceil(header.getBoundingClientRect().height))
+                : 140;
+
+            document.documentElement.style.setProperty('--header-height', `${headerHeight}px`);
+        }
+
+        function getCanvasWidth() {
+            return canvas.width / getDpr();
+        }
+
+        function getCanvasHeight() {
+            return canvas.height / getDpr();
+        }
+
+        function getTimelineWidth() {
+            return Math.max(1, getCanvasWidth() - LEFT_MARGIN - 50);
+        }
+
+        function getSafeTotalDuration() {
+            return totalDuration > 0 ? totalDuration : 1;
+        }
+
+        function getViewportLaneHeight() {
+            return Math.max(1, getCanvasHeight() - TOP_MARGIN);
+        }
+
+        function clampPan() {
+            const timelineWidth = getTimelineWidth();
+            const dataWidth = timelineWidth * zoom;
+
+            if (dataWidth <= timelineWidth) {
+                panX = 0;
+            } else {
+                const minPanX = timelineWidth - dataWidth;
+                const maxPanX = 0;
+                panX = Math.min(maxPanX, Math.max(minPanX, panX));
+            }
+
+            const dataHeight = Math.max(ROW_HEIGHT, layout.contentHeight);
+            const viewportLaneHeight = getViewportLaneHeight();
+
+            if (dataHeight <= viewportLaneHeight) {
+                panY = 0;
+            } else {
+                const minPanY = viewportLaneHeight - dataHeight;
+                const maxPanY = 0;
+                panY = Math.min(maxPanY, Math.max(minPanY, panY));
+            }
+        }
+
         function resizeCanvas() {
-            const dpr = window.devicePixelRatio || 1;
+            updateHeaderHeight();
+
+            const dpr = getDpr();
             canvas.width = container.clientWidth * dpr;
-            canvas.height = Math.max(
-                container.clientHeight * dpr,
-                layout.totalHeight * dpr
-            );
+            canvas.height = container.clientHeight * dpr;
             canvas.style.width = container.clientWidth + 'px';
-            canvas.style.height = (canvas.height / dpr) + 'px';
+            canvas.style.height = container.clientHeight + 'px';
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
             ctx.scale(dpr, dpr);
+            clampPan();
             draw();
         }
 
         function timeToX(time) {
-            return LEFT_MARGIN + (time / totalDuration) * (canvas.width / window.devicePixelRatio - LEFT_MARGIN - 50) * zoom + panX;
+            return LEFT_MARGIN + (time / getSafeTotalDuration()) * getTimelineWidth() * zoom + panX;
         }
 
         function durationToWidth(duration) {
-            return Math.max(MIN_SPAN_WIDTH, (duration / totalDuration) * (canvas.width / window.devicePixelRatio - LEFT_MARGIN - 50) * zoom);
+            return Math.max(MIN_SPAN_WIDTH, (duration / getSafeTotalDuration()) * getTimelineWidth() * zoom);
         }
 
         function laneToY(laneIndex) {
@@ -519,6 +609,33 @@ internal sealed class HtmlTraceExporter : ITraceExporter
             return `${ms.toFixed(0)}ms`;
         }
 
+        function isSpanVisibleByFilters(span) {
+            if (span.kind === 'msbuild.target') {
+                return showMsbuildTargets;
+            }
+
+            if (span.kind === 'msbuild.task') {
+                return showMsbuildTasks;
+            }
+
+            if (span.kind === 'test') {
+                return showTests;
+            }
+
+            return true;
+        }
+
+        function updateFilters() {
+            showMsbuildTargets = !filterMsbuildTargetsInput || filterMsbuildTargetsInput.checked;
+            showMsbuildTasks = !filterMsbuildTasksInput || filterMsbuildTasksInput.checked;
+            showTests = !filterTestsInput || filterTestsInput.checked;
+
+            updateSearchStatus();
+            hoveredSpan = null;
+            hideTooltip();
+            draw();
+        }
+
         function updateSearch(rawSearchTerm) {
             searchTerm = (rawSearchTerm ?? '').trim().toLowerCase();
             if (!searchTerm) {
@@ -547,7 +664,7 @@ internal sealed class HtmlTraceExporter : ITraceExporter
                 return;
             }
 
-            const count = matchedSpanIds ? matchedSpanIds.size : 0;
+            const count = spansData.filter(span => isSpanVisibleByFilters(span) && isSearchMatch(span)).length;
             const suffix = count === 1 ? '' : 'es';
             searchStatus.textContent = `${count} match${suffix}`;
         }
@@ -557,20 +674,25 @@ internal sealed class HtmlTraceExporter : ITraceExporter
         }
 
         function draw() {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            clampPan();
+
+            const canvasWidth = getCanvasWidth();
+            const canvasHeight = getCanvasHeight();
+
+            ctx.clearRect(0, 0, canvasWidth, canvasHeight);
 
             ctx.fillStyle = '#1e1e1e';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillRect(0, 0, canvasWidth, canvasHeight);
 
             ctx.fillStyle = '#252526';
-            ctx.fillRect(0, 0, LEFT_MARGIN, canvas.height);
+            ctx.fillRect(0, 0, LEFT_MARGIN, canvasHeight);
 
             jobsData.forEach((job, index) => {
                 const y = laneToY(index);
                 const laneHeight = layout.laneHeights[index];
                 
                 ctx.fillStyle = '#2d2d30';
-                ctx.fillRect(LEFT_MARGIN, y, canvas.width - LEFT_MARGIN, laneHeight);
+                ctx.fillRect(LEFT_MARGIN, y, canvasWidth - LEFT_MARGIN, laneHeight);
 
                 ctx.fillStyle = '#d4d4d4';
                 ctx.font = '12px sans-serif';
@@ -582,6 +704,7 @@ internal sealed class HtmlTraceExporter : ITraceExporter
             const visibleSpans = [];
             spansData.forEach(span => {
                 if (span.jobIndex < 0) return;
+                if (!isSpanVisibleByFilters(span)) return;
 
                 const rowIndex = layout.spanRows.get(span.id);
                 if (rowIndex === undefined) return;
@@ -591,8 +714,8 @@ internal sealed class HtmlTraceExporter : ITraceExporter
                 const y = laneToY(span.jobIndex) + LANE_INNER_PADDING + rowIndex * (ROW_HEIGHT + ROW_PADDING);
                 const height = ROW_HEIGHT;
 
-                if (x + width < LEFT_MARGIN || x > canvas.width) return;
-                if (y + height < TOP_MARGIN || y > canvas.height) return;
+                if (x + width < LEFT_MARGIN || x > canvasWidth) return;
+                if (y + height < TOP_MARGIN || y > canvasHeight) return;
 
                 visibleSpans.push({ span, x, y, width, height });
             });
@@ -636,10 +759,10 @@ internal sealed class HtmlTraceExporter : ITraceExporter
             });
 
             ctx.fillStyle = '#3e3e42';
-            ctx.fillRect(0, TOP_MARGIN - 30, canvas.width, 30);
+            ctx.fillRect(0, TOP_MARGIN - 30, canvasWidth, 30);
             
             const timelineSteps = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000];
-            const pixelsPerMs = zoom * (canvas.width / window.devicePixelRatio - LEFT_MARGIN - 50) / totalDuration;
+            const pixelsPerMs = zoom * getTimelineWidth() / getSafeTotalDuration();
             let step = timelineSteps.find(s => s * pixelsPerMs > 50) || timelineSteps[timelineSteps.length - 1];
 
             ctx.fillStyle = '#858585';
@@ -647,10 +770,10 @@ internal sealed class HtmlTraceExporter : ITraceExporter
             ctx.textAlign = 'center';
             for (let t = 0; t <= totalDuration; t += step) {
                 const x = timeToX(t);
-                if (x >= LEFT_MARGIN && x <= canvas.width) {
+                if (x >= LEFT_MARGIN && x <= canvasWidth) {
                     ctx.fillText(formatDuration(t), x, TOP_MARGIN - 15);
                     ctx.fillStyle = '#3e3e42';
-                    ctx.fillRect(x, TOP_MARGIN, 1, canvas.height - TOP_MARGIN);
+                    ctx.fillRect(x, TOP_MARGIN, 1, canvasHeight - TOP_MARGIN);
                     ctx.fillStyle = '#858585';
                 }
             }
@@ -660,6 +783,7 @@ internal sealed class HtmlTraceExporter : ITraceExporter
             for (let i = spansData.length - 1; i >= 0; i--) {
                 const span = spansData[i];
                 if (span.jobIndex < 0) continue;
+                if (!isSpanVisibleByFilters(span)) continue;
 
                 const rowIndex = layout.spanRows.get(span.id);
                 if (rowIndex === undefined) continue;
@@ -701,20 +825,36 @@ internal sealed class HtmlTraceExporter : ITraceExporter
 
         canvas.addEventListener('wheel', (e) => {
             e.preventDefault();
-            const rect = canvas.getBoundingClientRect();
-            const mouseX = e.clientX - rect.left;
-            const oldZoom = zoom;
-            
-            zoom *= e.deltaY > 0 ? 0.9 : 1.1;
-            zoom = Math.max(0.1, Math.min(zoom, 50));
 
-            const zoomPoint = (mouseX - LEFT_MARGIN - panX) / oldZoom;
-            panX = mouseX - LEFT_MARGIN - zoomPoint * zoom;
+            if (e.ctrlKey || e.metaKey) {
+                const rect = canvas.getBoundingClientRect();
+                const mouseX = e.clientX - rect.left;
+                const oldZoom = zoom;
 
+                zoom *= e.deltaY > 0 ? 0.9 : 1.1;
+                zoom = Math.max(ZOOM_MIN, Math.min(zoom, ZOOM_MAX));
+
+                const zoomPoint = (mouseX - LEFT_MARGIN - panX) / oldZoom;
+                panX = mouseX - LEFT_MARGIN - zoomPoint * zoom;
+            } else {
+                const useShiftAsHorizontal = e.shiftKey && Math.abs(e.deltaX) < Math.abs(e.deltaY);
+                const horizontalDelta = useShiftAsHorizontal ? e.deltaY : e.deltaX;
+                const verticalDelta = useShiftAsHorizontal ? 0 : e.deltaY;
+
+                panX -= horizontalDelta;
+                panY -= verticalDelta;
+            }
+
+            clampPan();
             draw();
-        });
+            hideTooltip();
+        }, { passive: false });
 
         canvas.addEventListener('mousedown', (e) => {
+            if (e.button !== 0) {
+                return;
+            }
+
             isDragging = true;
             lastX = e.clientX;
             lastY = e.clientY;
@@ -732,6 +872,7 @@ internal sealed class HtmlTraceExporter : ITraceExporter
                 panY += dy;
                 lastX = e.clientX;
                 lastY = e.clientY;
+                clampPan();
                 draw();
                 hideTooltip();
             } else {
@@ -751,6 +892,10 @@ internal sealed class HtmlTraceExporter : ITraceExporter
         });
 
         canvas.addEventListener('mouseup', () => {
+            isDragging = false;
+        });
+
+        window.addEventListener('mouseup', () => {
             isDragging = false;
         });
 
@@ -774,6 +919,22 @@ internal sealed class HtmlTraceExporter : ITraceExporter
                 searchInput.blur();
             });
         }
+
+        if (filterMsbuildTargetsInput) {
+            filterMsbuildTargetsInput.addEventListener('change', updateFilters);
+        }
+
+        if (filterMsbuildTasksInput) {
+            filterMsbuildTasksInput.addEventListener('change', updateFilters);
+        }
+
+        if (filterTestsInput) {
+            filterTestsInput.addEventListener('change', updateFilters);
+        }
+
+        showMsbuildTargets = !filterMsbuildTargetsInput || filterMsbuildTargetsInput.checked;
+        showMsbuildTasks = !filterMsbuildTasksInput || filterMsbuildTasksInput.checked;
+        showTests = !filterTestsInput || filterTestsInput.checked;
 
         window.addEventListener('keydown', (e) => {
             if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f' && searchInput) {
