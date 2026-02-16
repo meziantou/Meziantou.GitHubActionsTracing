@@ -269,12 +269,11 @@ internal sealed partial class TraceModel
                 ? groups.Peek()
                 : GetStepSpan(stepSpans, activeTimestamp) ?? jobSpan;
 
-            if (message.StartsWith("::group::", StringComparison.Ordinal))
+            if (TryGetGroupStartTitle(message, out var groupTitle))
             {
-                var title = message[9..].Trim();
                 var start = activeTimestamp ?? parentSpan.StartTime;
                 var groupSpan = AddSpan(
-                    name: string.IsNullOrWhiteSpace(title) ? "group" : title,
+                    name: string.IsNullOrWhiteSpace(groupTitle) ? "group" : groupTitle,
                     kind: "log.group",
                     startTime: start,
                     endTime: start.AddMilliseconds(1),
@@ -289,7 +288,7 @@ internal sealed partial class TraceModel
                 continue;
             }
 
-            if (message.StartsWith("::endgroup::", StringComparison.Ordinal))
+            if (IsGroupEnd(message))
             {
                 if (groups.TryPop(out var groupSpan))
                 {
@@ -826,6 +825,30 @@ internal sealed partial class TraceModel
             return (null, line);
 
         return (timestamp, match.Groups["msg"].Value);
+    }
+
+    private static bool TryGetGroupStartTitle(string message, out string title)
+    {
+        if (message.StartsWith("::group::", StringComparison.Ordinal))
+        {
+            title = message[9..].Trim();
+            return true;
+        }
+
+        if (message.StartsWith("##[group]", StringComparison.Ordinal))
+        {
+            title = message[9..].Trim();
+            return true;
+        }
+
+        title = string.Empty;
+        return false;
+    }
+
+    private static bool IsGroupEnd(string message)
+    {
+        return message.StartsWith("::endgroup::", StringComparison.Ordinal)
+            || message.StartsWith("##[endgroup]", StringComparison.Ordinal);
     }
 
     private static (string Level, string Message, Dictionary<string, object?> Attributes)? ParseAnnotation(string message)

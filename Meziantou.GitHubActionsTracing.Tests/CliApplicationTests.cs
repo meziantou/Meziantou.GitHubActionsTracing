@@ -159,8 +159,13 @@ public sealed class CliApplicationTests
         Assert.Contains(spans, span => string.Equals(GetAttributeValue(span, "span.kind"), "workflow", StringComparison.Ordinal));
         Assert.Contains(spans, span => string.Equals(GetAttributeValue(span, "span.kind"), "job", StringComparison.Ordinal));
         Assert.Contains(spans, span => string.Equals(GetAttributeValue(span, "span.kind"), "step", StringComparison.Ordinal));
+        Assert.Contains(spans, span => string.Equals(GetAttributeValue(span, "span.kind"), "log.group", StringComparison.Ordinal));
         Assert.Contains(spans, span => string.Equals(GetAttributeValue(span, "span.kind"), "msbuild.target", StringComparison.Ordinal));
         Assert.Contains(spans, span => string.Equals(GetAttributeValue(span, "span.kind"), "test", StringComparison.Ordinal));
+
+        var disableAutomaticGarbageCollectionGroup = spans.Single(span =>
+            string.Equals(span.GetProperty("name").GetString(), "Disabling automatic garbage collection", StringComparison.Ordinal) &&
+            string.Equals(GetAttributeValue(span, "span.kind"), "log.group", StringComparison.Ordinal));
 
         var testSpans = spans
             .Where(span => string.Equals(GetAttributeValue(span, "span.kind"), "test", StringComparison.Ordinal))
@@ -200,6 +205,17 @@ public sealed class CliApplicationTests
             })
             .Where(static item => !string.IsNullOrEmpty(item.SpanId))
             .ToDictionary(static item => item.SpanId!, static item => item.Span, StringComparer.Ordinal);
+
+        Assert.True(disableAutomaticGarbageCollectionGroup.TryGetProperty("parentSpanId", out var groupParentSpanIdElement) && groupParentSpanIdElement.ValueKind is JsonValueKind.String,
+            "Group span must have a parent span id");
+
+        var groupParentSpanId = groupParentSpanIdElement.GetString();
+        Assert.NotNull(groupParentSpanId);
+
+        Assert.True(spansById.TryGetValue(groupParentSpanId, out var groupParentSpan),
+            $"Cannot find parent span for group span '{disableAutomaticGarbageCollectionGroup.GetProperty("name").GetString()}'");
+
+        Assert.Equal("step", GetAttributeValue(groupParentSpan, "span.kind"));
 
         Assert.All(testSpans, span =>
         {
