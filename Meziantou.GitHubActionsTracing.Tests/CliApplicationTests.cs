@@ -36,7 +36,7 @@ public sealed class CliApplicationTests
 
             Commands:
               export <workflow-run-url-or-folder>  Download and trace a GitHub Actions workflow run, or trace a downloaded run-info folder
-              download-run-info <url>              Download a single GitHub Actions job and workflow artifacts
+              download-run-info <url>              Download GitHub Actions workflow run info and artifacts
 
 
             """);
@@ -109,13 +109,13 @@ public sealed class CliApplicationTests
         InlineSnapshot.Validate(actual.TrimEnd(), """
             exit=0
             Description:
-              Download a single GitHub Actions job and workflow artifacts
+              Download GitHub Actions workflow run info and artifacts
 
             Usage:
               Meziantou.GitHubActionsTracing.Tests download-run-info <url> [options]
 
             Arguments:
-              <url>  URL of the GitHub Actions job
+              <url>  URL of the GitHub Actions workflow run
 
             Options:
               --output <output> (REQUIRED)  Destination folder

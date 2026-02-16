@@ -80,32 +80,32 @@ internal static class CliApplication
             DefaultValueFactory = static _ => true,
         };
 
-        var downloadJobUrlArgument = new Argument<Uri>("url")
+        var downloadRunInfoUrlArgument = new Argument<Uri>("url")
         {
-            Description = "URL of the GitHub Actions job",
+            Description = "URL of the GitHub Actions workflow run",
             CustomParser = ParseWorkflowRunUri,
         };
 
-        var downloadJobOutputOption = new Option<FullPath>("--output")
+        var downloadRunInfoOutputOption = new Option<FullPath>("--output")
         {
             Description = "Destination folder",
             Required = true,
             CustomParser = ParseFullPath,
         };
 
-        var downloadJobCommand = new Command("download-run-info", "Download a single GitHub Actions job and workflow artifacts");
-        downloadJobCommand.Arguments.Add(downloadJobUrlArgument);
-        downloadJobCommand.Options.Add(downloadJobOutputOption);
+        var downloadRunInfoCommand = new Command("download-run-info", "Download GitHub Actions workflow run info and artifacts");
+        downloadRunInfoCommand.Arguments.Add(downloadRunInfoUrlArgument);
+        downloadRunInfoCommand.Options.Add(downloadRunInfoOutputOption);
 
-        downloadJobCommand.SetAction(async (parseResult, cancellationToken) =>
+        downloadRunInfoCommand.SetAction(async (parseResult, cancellationToken) =>
         {
             try
             {
-                var url = parseResult.GetRequiredValue(downloadJobUrlArgument);
-                var outputDirectory = parseResult.GetRequiredValue(downloadJobOutputOption);
+                var url = parseResult.GetRequiredValue(downloadRunInfoUrlArgument);
+                var outputDirectory = parseResult.GetRequiredValue(downloadRunInfoOutputOption);
 
-                AppLog.Section("Downloading GitHub Actions job data");
-                var downloadedPath = await GitHubRunDownloader.DownloadJobAsync(url, outputDirectory, cancellationToken);
+                AppLog.Section("Downloading GitHub Actions run info");
+                var downloadedPath = await GitHubRunDownloader.DownloadRunInfoAsync(url, outputDirectory, cancellationToken);
                 AppLog.Info($"Output folder: {downloadedPath}");
                 return 0;
             }
@@ -176,7 +176,7 @@ internal static class CliApplication
         var rootCommand = new RootCommand("GitHub Actions tracing tools")
         {
             exportCommand,
-            downloadJobCommand,
+            downloadRunInfoCommand,
         };
 
         try

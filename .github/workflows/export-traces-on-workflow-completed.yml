@@ -43,13 +43,17 @@ jobs:
           "id=$runId" >> $env:GITHUB_OUTPUT
           "url=${{ github.server_url }}/${{ github.repository }}/actions/runs/$runId" >> $env:GITHUB_OUTPUT
 
-      - name: Export workflow trace files
+      - name: Download workflow run info
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
+          dotnet run --project ./Meziantou.GitHubActionsTracing/ -- download-run-info "${{ steps.run.outputs.url }}" --output "./run-info"
+
+      - name: Export workflow trace files
+        run: |
           New-Item -ItemType Directory -Path artifacts -Force | Out-Null
 
-          dotnet run --project ./Meziantou.GitHubActionsTracing/ -- export "${{ steps.run.outputs.url }}" `
+          dotnet run --project ./Meziantou.GitHubActionsTracing/ -- export "./run-info" `
             --chromium-path "./artifacts/trace-${{ steps.run.outputs.id }}.json" `
             --speedscope-path "./artifacts/trace-${{ steps.run.outputs.id }}.speedscope.json" `
             --otel-path "./artifacts/trace-${{ steps.run.outputs.id }}.otel.json"

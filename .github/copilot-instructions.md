@@ -24,3 +24,7 @@ In addition to the rules enforced by `.editorconfig`, you SHOULD:
 - When writing tests, do not emit "Act", "Arrange" or "Assert" comments.
 - There should be no trailing whitespace in any lines.
 - Add a blank line before XML documentation comments (`///`) when they follow other code (methods, properties, fields, etc.).
+
+# Tests
+
+For the tests that validate the output of the `--help` options, do not alter the output by trying to format it and remove some characters. Use `InlineSnapshot` to assert the expected output.

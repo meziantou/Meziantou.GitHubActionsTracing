@@ -59,7 +59,7 @@ Meziantou.GitHubActionsTracing export https://github.com/OWNER/REPO/actions/runs
 ```
 
 ```bash
-Meziantou.GitHubActionsTracing download-run-info https://github.com/OWNER/REPO/actions/jobs/123456789 --output ./run-info
+Meziantou.GitHubActionsTracing download-run-info https://github.com/OWNER/REPO/actions/runs/123456 --output ./run-info
 Meziantou.GitHubActionsTracing export ./run-info --chromium-path trace.json
 ```
 
@@ -93,5 +93,7 @@ Meziantou.GitHubActionsTracing export https://github.com/OWNER/REPO/actions/runs
 ### `download-run-info` command
 
 ```bash
-Meziantou.GitHubActionsTracing download-run-info https://github.com/OWNER/REPO/actions/jobs/123456789 --output ./run-info
+Meziantou.GitHubActionsTracing download-run-info https://github.com/OWNER/REPO/actions/runs/123456 --output ./run-info
 ```
+
+A workflow job URL resolves to the same workflow run and downloads the full run data.

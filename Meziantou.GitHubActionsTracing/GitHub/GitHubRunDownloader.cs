@@ -12,6 +12,11 @@ internal static class GitHubRunDownloader
     private static readonly HttpClient GitHubHttpClient = CreateGitHubHttpClient();
     private static readonly JsonSerializerOptions JsonSerializerOptions = new(JsonSerializerDefaults.Web) { WriteIndented = true };
 
+    public static Task<FullPath> DownloadRunInfoAsync(Uri workflowRunOrJobUrl, FullPath outputDirectory, CancellationToken cancellationToken)
+    {
+        return DownloadAsync(workflowRunOrJobUrl, outputDirectory, cancellationToken);
+    }
+
     public static async Task<FullPath> DownloadAsync(Uri workflowRunUrl, FullPath temporaryDirectory, CancellationToken cancellationToken)
     {
         var runIdentifier = GitHubRunIdentifier.Parse(workflowRunUrl);
@@ -49,42 +54,6 @@ internal static class GitHubRunDownloader
         await DownloadArtifactsAsync(GitHubHttpClient, runIdentifier, artifactsDirectory, artifacts, cancellationToken);
 
         return temporaryDirectory;
-    }
-
-    public static async Task<FullPath> DownloadJobAsync(Uri jobUrl, FullPath outputDirectory, CancellationToken cancellationToken)
-    {
-        var jobIdentifier = GitHubJobIdentifier.Parse(jobUrl);
-        var runIdentifier = new GitHubRunIdentifier(jobIdentifier.Owner, jobIdentifier.Repository, jobIdentifier.RunId);
-
-        Directory.CreateDirectory(outputDirectory);
-        var metadataDirectory = outputDirectory / "metadata";
-        var logsDirectory = outputDirectory / "logs" / "jobs";
-        var artifactsDirectory = outputDirectory / "artifacts";
-
-        Directory.CreateDirectory(metadataDirectory);
-        Directory.CreateDirectory(logsDirectory);
-        Directory.CreateDirectory(artifactsDirectory);
-
-        var run = await GetJsonAsync<WorkflowRunResponse>(GitHubHttpClient, runIdentifier.GetApiPath($"/actions/runs/{runIdentifier.RunId}"), cancellationToken);
-        await WriteJsonAsync(metadataDirectory / "run.json", run, cancellationToken);
-        AppLog.Info($"Run: {run.Id} / {run.Name ?? "(no name)"}");
-
-        var job = await GetJsonAsync<WorkflowRunJob>(GitHubHttpClient, runIdentifier.GetApiPath($"/actions/jobs/{jobIdentifier.JobId}"), cancellationToken);
-        await WriteJsonAsync(metadataDirectory / "jobs.json", new WorkflowJobsResponse { Jobs = [job] }, cancellationToken);
-        await WriteJsonAsync(metadataDirectory / $"job-{job.Id}.json", job, cancellationToken);
-        AppLog.Info($"Job: {job.Id} / {job.Name ?? "(no name)"}");
-
-        AppLog.Info($"Downloading logs for job {job.Id} ({job.Name})");
-        var content = await GetBytesAsync(GitHubHttpClient, runIdentifier.GetApiPath($"/actions/jobs/{job.Id}/logs"), cancellationToken);
-        var logText = DecodeLogContent(content);
-        await File.WriteAllTextAsync(logsDirectory / $"{job.Id}.log", logText, cancellationToken);
-
-        var artifacts = await GetAllArtifactsAsync(GitHubHttpClient, runIdentifier, cancellationToken);
-        await WriteJsonAsync(metadataDirectory / "artifacts.json", new WorkflowArtifactsResponse { Artifacts = artifacts }, cancellationToken);
-        AppLog.Info($"Artifacts: {artifacts.Count}");
-        await DownloadArtifactsAsync(GitHubHttpClient, runIdentifier, artifactsDirectory, artifacts, cancellationToken);
-
-        return outputDirectory;
     }
 
     private static async Task DownloadArtifactsAsync(HttpClient httpClient, GitHubRunIdentifier runIdentifier, FullPath artifactsDirectory, IReadOnlyCollection<WorkflowRunArtifact> artifacts, CancellationToken cancellationToken)
@@ -289,4 +258,5 @@ internal static class GitHubRunDownloader
 
         return value[..maxLength] + "...";
     }
+
 }
