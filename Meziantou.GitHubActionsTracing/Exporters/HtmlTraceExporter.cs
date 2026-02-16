@@ -376,6 +376,11 @@ internal sealed class HtmlTraceExporter : ITraceExporter
             'test': '#d73a49',
         };
 
+        const spansById = new Map();
+        spansData.forEach(span => {
+            spansById.set(span.id, span);
+        });
+
         function buildLayout() {
             const spanRows = new Map();
             const spanVariants = new Map();
@@ -615,6 +620,26 @@ internal sealed class HtmlTraceExporter : ITraceExporter
             return `${ms.toFixed(0)}ms`;
         }
 
+        function getSpanHierarchy(span) {
+            const parts = [];
+            const visited = new Set();
+            let current = span;
+
+            while (current && !visited.has(current.id)) {
+                visited.add(current.id);
+                parts.push(current.name || '(unnamed span)');
+
+                if (current.parentId === null || current.parentId === undefined || current.parentId === 0) {
+                    break;
+                }
+
+                current = spansById.get(current.parentId);
+            }
+
+            parts.reverse();
+            return parts.join(', ');
+        }
+
         function isSpanVisibleByFilters(span) {
             if (span.kind === 'msbuild.target') {
                 return showMsbuildTargets;
@@ -816,6 +841,7 @@ internal sealed class HtmlTraceExporter : ITraceExporter
             const lines = [
                 `<div class='tooltip-title'>${span.name}</div>`,
                 `<div class='tooltip-row'><span class='tooltip-label'>Kind:</span> ${span.kind}</div>`,
+                `<div class='tooltip-row'><span class='tooltip-label'>Hierarchy:</span> ${getSpanHierarchy(span)}</div>`,
                 `<div class='tooltip-row'><span class='tooltip-label'>Duration:</span> ${formatDuration(span.duration)}</div>`,
             ];
 

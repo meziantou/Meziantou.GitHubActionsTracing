@@ -447,6 +447,9 @@ public sealed class CliApplicationTests
         Assert.Contains("overflow-wrap: anywhere;", fileContent, StringComparison.Ordinal);
         Assert.Contains("function positionTooltip(mouseX, mouseY)", fileContent, StringComparison.Ordinal);
         Assert.Contains("positionTooltip(e.clientX, e.clientY);", fileContent, StringComparison.Ordinal);
+        Assert.Contains("const spansById = new Map();", fileContent, StringComparison.Ordinal);
+        Assert.Contains("function getSpanHierarchy(span)", fileContent, StringComparison.Ordinal);
+        Assert.Contains("tooltip-label'>Hierarchy:</span>", fileContent, StringComparison.Ordinal);
     }
 
     [Fact]
