@@ -306,7 +306,8 @@ internal sealed class HtmlTraceExporter : ITraceExporter
             padding: 12px;
             pointer-events: none;
             display: none;
-            max-width: 400px;
+            width: max-content;
+            max-width: min(900px, calc(100vw - 16px));
             max-height: calc(100vh - 16px);
             overflow: auto;
             overflow-wrap: anywhere;
