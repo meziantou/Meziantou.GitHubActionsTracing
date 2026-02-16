@@ -62,6 +62,11 @@ internal sealed class HtmlTraceExporter : ITraceExporter
         html.AppendLine("    <div class=\"header\">");
         html.AppendLine($"        <h1>{HtmlEncode(model.WorkflowRun.Name ?? "Workflow Run")}</h1>");
         html.AppendLine(CultureInfo.InvariantCulture, $"        <div class=\"info\">Duration: {FormatDuration((maxTime - minTime).TotalMilliseconds)} | Spans: {spans.Count} | Jobs: {jobs.Count}</div>");
+        html.AppendLine("        <div class=\"header-controls\">");
+        html.AppendLine("            <label for=\"search\">Search:</label>");
+        html.AppendLine("            <input id=\"search\" class=\"search-input\" type=\"text\" placeholder=\"Span name contains...\" autocomplete=\"off\" />");
+        html.AppendLine("            <span id=\"search-status\" class=\"search-status\"></span>");
+        html.AppendLine("        </div>");
         html.AppendLine("    </div>");
         html.AppendLine("    <div id=\"container\">");
         html.AppendLine("        <canvas id=\"canvas\"></canvas>");
@@ -181,9 +186,34 @@ internal sealed class HtmlTraceExporter : ITraceExporter
             color: #858585;
             font-size: 14px;
         }
+        .header-controls {
+            margin-top: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #cccccc;
+            font-size: 13px;
+        }
+        .search-input {
+            width: min(520px, 60vw);
+            padding: 6px 10px;
+            border-radius: 4px;
+            border: 1px solid #3e3e42;
+            background: #1e1e1e;
+            color: #d4d4d4;
+            outline: none;
+        }
+        .search-input:focus {
+            border-color: #3794ff;
+            box-shadow: 0 0 0 1px #3794ff;
+        }
+        .search-status {
+            color: #9cdcfe;
+            min-width: 90px;
+        }
         #container {
             position: absolute;
-            top: 100px;
+            top: 140px;
             left: 0;
             right: 0;
             bottom: 0;
@@ -229,6 +259,8 @@ internal sealed class HtmlTraceExporter : ITraceExporter
         const canvas = document.getElementById('canvas');
         const ctx = canvas.getContext('2d');
         const tooltip = document.getElementById('tooltip');
+        const searchInput = document.getElementById('search');
+        const searchStatus = document.getElementById('search-status');
 
         const ROW_HEIGHT = 16;
         const ROW_PADDING = 2;
@@ -245,6 +277,8 @@ internal sealed class HtmlTraceExporter : ITraceExporter
         let lastX = 0;
         let lastY = 0;
         let hoveredSpan = null;
+        let searchTerm = '';
+        let matchedSpanIds = null;
 
         const kindColors = {
             'workflow': '#3794ff',
@@ -437,6 +471,43 @@ internal sealed class HtmlTraceExporter : ITraceExporter
             return `${ms.toFixed(0)}ms`;
         }
 
+        function updateSearch(rawSearchTerm) {
+            searchTerm = (rawSearchTerm ?? '').trim().toLowerCase();
+            if (!searchTerm) {
+                matchedSpanIds = null;
+            } else {
+                matchedSpanIds = new Set(
+                    spansData
+                        .filter(span => span.name && span.name.toLowerCase().includes(searchTerm))
+                        .map(span => span.id)
+                );
+            }
+
+            updateSearchStatus();
+            hoveredSpan = null;
+            hideTooltip();
+            draw();
+        }
+
+        function updateSearchStatus() {
+            if (!searchStatus) {
+                return;
+            }
+
+            if (!searchTerm) {
+                searchStatus.textContent = '';
+                return;
+            }
+
+            const count = matchedSpanIds ? matchedSpanIds.size : 0;
+            const suffix = count === 1 ? '' : 'es';
+            searchStatus.textContent = `${count} match${suffix}`;
+        }
+
+        function isSearchMatch(span) {
+            return matchedSpanIds === null || matchedSpanIds.has(span.id);
+        }
+
         function draw() {
             ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -478,13 +549,30 @@ internal sealed class HtmlTraceExporter : ITraceExporter
                 visibleSpans.push({ span, x, y, width, height });
             });
 
+            const hasSearch = searchTerm.length > 0;
             visibleSpans.forEach(({ span, x, y, width, height }) => {
+                const isMatch = isSearchMatch(span);
                 const variant = layout.spanVariants.get(span.id) ?? 0;
-                ctx.fillStyle = getSpanColor(span, variant);
+                if (hasSearch && !isMatch) {
+                    ctx.globalAlpha = 0.18;
+                    ctx.fillStyle = '#5a5a5a';
+                } else {
+                    ctx.globalAlpha = 1;
+                    ctx.fillStyle = getSpanColor(span, variant);
+                }
+
                 ctx.fillRect(x, y, width, height);
+                ctx.globalAlpha = 1;
+
+                if (hasSearch && isMatch) {
+                    ctx.strokeStyle = '#f2cc60';
+                    ctx.lineWidth = 1;
+                    ctx.strokeRect(x + 0.5, y + 0.5, Math.max(1, width - 1), Math.max(1, height - 1));
+                }
 
                 if (width > 50) {
-                    ctx.fillStyle = '#ffffff';
+                    ctx.fillStyle = hasSearch && !isMatch ? '#d4d4d4' : '#ffffff';
+                    ctx.globalAlpha = hasSearch && !isMatch ? 0.85 : 1;
                     ctx.font = '11px sans-serif';
                     ctx.textAlign = 'left';
                     ctx.textBaseline = 'middle';
@@ -495,6 +583,7 @@ internal sealed class HtmlTraceExporter : ITraceExporter
                         ? text.substring(0, Math.floor(text.length * maxTextWidth / textWidth)) + '...'
                         : text;
                     ctx.fillText(displayText, x + 4, y + height / 2);
+                    ctx.globalAlpha = 1;
                 }
             });
 
@@ -620,6 +709,30 @@ internal sealed class HtmlTraceExporter : ITraceExporter
         canvas.addEventListener('mouseleave', () => {
             isDragging = false;
             hideTooltip();
+        });
+
+        if (searchInput) {
+            searchInput.addEventListener('input', () => {
+                updateSearch(searchInput.value);
+            });
+
+            searchInput.addEventListener('keydown', (e) => {
+                if (e.key !== 'Escape') {
+                    return;
+                }
+
+                searchInput.value = '';
+                updateSearch('');
+                searchInput.blur();
+            });
+        }
+
+        window.addEventListener('keydown', (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f' && searchInput) {
+                e.preventDefault();
+                searchInput.focus();
+                searchInput.select();
+            }
         });
 
         window.addEventListener('resize', resizeCanvas);
