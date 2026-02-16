@@ -10,6 +10,9 @@ namespace Meziantou.GitHubActionsTracing.Exporters;
 internal sealed class OpenTelemetryTraceExporter : ITraceExporter
 {
     private const string ActivitySourceName = "Meziantou.GitHubActionsTracing";
+    private const string DefaultServiceName = "GitHub Actions";
+    private const string OtelServiceNameEnvironmentVariableName = "OTEL_SERVICE_NAME";
+
     private readonly string? _otelEndpoint;
     private readonly FullPath? _otelPath;
     private readonly OtlpExportProtocol _otelProtocol;
@@ -30,14 +33,21 @@ internal sealed class OpenTelemetryTraceExporter : ITraceExporter
     {
         AppLog.Info("Exporting OpenTelemetry trace");
 
+        var serviceName = System.Environment.GetEnvironmentVariable(OtelServiceNameEnvironmentVariableName);
+        if (string.IsNullOrWhiteSpace(serviceName))
+        {
+            serviceName = DefaultServiceName;
+        }
+
         var resourceBuilder = ResourceBuilder
             .CreateDefault()
-            .AddService(serviceName: "Meziantou.GitHubActionsTracing");
+            .AddService(serviceName: serviceName);
 
         using var activitySource = new ActivitySource(ActivitySourceName);
         var tracerProviderBuilder = Sdk
             .CreateTracerProviderBuilder()
             .SetResourceBuilder(resourceBuilder)
+            .SetSampler(new AlwaysOnSampler())
             .AddSource(ActivitySourceName);
         OtelJsonFileExporter? otelFileExporter = null;
         SimpleActivityExportProcessor? otelFileProcessor = null;
