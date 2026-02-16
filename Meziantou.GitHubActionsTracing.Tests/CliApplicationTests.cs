@@ -3,7 +3,6 @@ using System.Text.Json;
 using Meziantou.Framework;
 using Meziantou.Framework.InlineSnapshotTesting;
 using Meziantou.GitHubActionsTracing.Exporters;
-using OpenTelemetry.Exporter;
 
 [assembly: CollectionBehavior(DisableTestParallelization = true)]
 
@@ -130,22 +129,20 @@ public sealed class CliApplicationTests
         var fixtureDirectory = temporaryDirectory / "fixture";
         ExtractEmbeddedFixture("Run21998208405_Job63563697544.zip", fixtureDirectory);
 
-        var model = TraceModel.Load(fixtureDirectory, new TraceLoadOptions
-        {
-            IncludeBinlog = true,
-            IncludeTests = true,
-            MinimumBinlogDuration = TimeSpan.Zero,
-            MinimumTestDuration = TimeSpan.Zero,
-        });
-
         var outputPath = temporaryDirectory / "trace.otel.json";
-        await TraceExporter.ExportAsync(model,
-        [
-            new OpenTelemetryTraceExporter(
-                otelEndpoint: null,
-                otelProtocol: OtlpExportProtocol.Grpc,
-                otelPath: outputPath),
-        ]);
+        var commandResult = await InvokeCliAsync(
+            "export",
+            fixtureDirectory.ToString(),
+            "--otel-path",
+            outputPath.ToString(),
+            "--include-binlog",
+            "--include-tests",
+            "--minimum-binlog-duration",
+            "00:00:00",
+            "--minimum-test-duration",
+            "00:00:00");
+
+        Assert.Equal(0, commandResult.ExitCode);
 
         Assert.True(File.Exists(outputPath));
 
