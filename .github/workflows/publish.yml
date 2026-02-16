@@ -29,17 +29,33 @@ jobs:
         uses: actions/setup-dotnet@v5
 
       - name: Test
-        run: dotnet test --configuration ${{ env.Configuration }}
+        run: |
+          dotnet test --configuration ${{ env.Configuration }} --logger "trx;LogFileName=tests.trx" --results-directory ./artifacts/test-results -bl:./artifacts/logs/test.binlog
 
       - name: Pack
+        if: always()
         run: |
-          dotnet pack Meziantou.GitHubActionsTracing --configuration ${{ env.Configuration }} --output ./artifacts
+          dotnet pack Meziantou.GitHubActionsTracing --configuration ${{ env.Configuration }} --output ./artifacts -bl:./artifacts/logs/pack.binlog
 
-      - name: Upload artifacts
+      - name: Upload NuGet packages
+        if: always()
         uses: actions/upload-artifact@v6
         with:
           name: nuget-packages
           path: ./artifacts/*.nupkg
+          retention-days: 1
+          if-no-files-found: warn
+
+      - name: Upload build artifacts
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: build-tests-artifacts
+          path: |
+            ./artifacts/logs/*.binlog
+            ./artifacts/test-results/**/*.trx
+          retention-days: 1
+          if-no-files-found: warn
 
       - name: NuGet login (OIDC → temp API key)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
