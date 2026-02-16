@@ -307,6 +307,11 @@ internal sealed class HtmlTraceExporter : ITraceExporter
             pointer-events: none;
             display: none;
             max-width: 400px;
+            max-height: calc(100vh - 16px);
+            overflow: auto;
+            overflow-wrap: anywhere;
+            word-break: break-word;
+            white-space: normal;
             z-index: 1000;
             font-size: 12px;
             box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
@@ -822,8 +827,30 @@ internal sealed class HtmlTraceExporter : ITraceExporter
 
             tooltip.innerHTML = lines.join('');
             tooltip.style.display = 'block';
-            tooltip.style.left = (mouseX + 10) + 'px';
-            tooltip.style.top = (mouseY + 10) + 'px';
+            positionTooltip(mouseX, mouseY);
+        }
+
+        function positionTooltip(mouseX, mouseY) {
+            const tooltipOffset = 10;
+            const viewportPadding = 8;
+            const rect = tooltip.getBoundingClientRect();
+
+            let left = mouseX + tooltipOffset;
+            let top = mouseY + tooltipOffset;
+
+            if (left + rect.width > window.innerWidth - viewportPadding) {
+                left = mouseX - rect.width - tooltipOffset;
+            }
+
+            if (top + rect.height > window.innerHeight - viewportPadding) {
+                top = mouseY - rect.height - tooltipOffset;
+            }
+
+            left = Math.max(viewportPadding, Math.min(left, window.innerWidth - rect.width - viewportPadding));
+            top = Math.max(viewportPadding, Math.min(top, window.innerHeight - rect.height - viewportPadding));
+
+            tooltip.style.left = left + 'px';
+            tooltip.style.top = top + 'px';
         }
 
         function hideTooltip() {
@@ -892,8 +919,7 @@ internal sealed class HtmlTraceExporter : ITraceExporter
                         hideTooltip();
                     }
                 } else if (span) {
-                    tooltip.style.left = (e.clientX + 10) + 'px';
-                    tooltip.style.top = (e.clientY + 10) + 'px';
+                    positionTooltip(e.clientX, e.clientY);
                 }
             }
         });

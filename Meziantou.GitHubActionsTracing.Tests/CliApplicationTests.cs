@@ -443,6 +443,10 @@ public sealed class CliApplicationTests
         Assert.Contains("span.kind === 'msbuild.target'", fileContent, StringComparison.Ordinal);
         Assert.Contains("span.kind === 'msbuild.task'", fileContent, StringComparison.Ordinal);
         Assert.Contains("span.kind === 'test'", fileContent, StringComparison.Ordinal);
+        Assert.Contains("max-height: calc(100vh - 16px);", fileContent, StringComparison.Ordinal);
+        Assert.Contains("overflow-wrap: anywhere;", fileContent, StringComparison.Ordinal);
+        Assert.Contains("function positionTooltip(mouseX, mouseY)", fileContent, StringComparison.Ordinal);
+        Assert.Contains("positionTooltip(e.clientX, e.clientY);", fileContent, StringComparison.Ordinal);
     }
 
     [Fact]
