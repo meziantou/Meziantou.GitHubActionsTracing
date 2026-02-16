@@ -14,6 +14,7 @@ namespace Meziantou.GitHubActionsTracing;
 internal sealed partial class TraceModel
 {
     private static readonly JsonSerializerOptions JsonSerializerOptions = new(JsonSerializerDefaults.Web);
+    private static readonly int[] Ansi256ColorSteps = [0, 95, 135, 175, 215, 255];
     private const int BinlogVersionWithDateTimeKind = 21; // Support DateTimeKind in DateTime properties
 
     private readonly List<TraceSpan> _spans = [];
@@ -1138,6 +1139,34 @@ internal sealed partial class TraceModel
 
     private static (string Level, string Message, Dictionary<string, object?> Attributes)? ParseAnnotation(string message)
     {
+        var messageWithoutAnsi = StripAnsiEscapeSequences(message);
+
+        var commandAnnotation = ParseWorkflowCommandAnnotation(messageWithoutAnsi);
+        if (commandAnnotation is not null)
+            return commandAnnotation;
+
+        var legacyAnnotation = ParseLegacyAnnotation(messageWithoutAnsi);
+        if (legacyAnnotation is not null)
+            return legacyAnnotation;
+
+        if (string.IsNullOrWhiteSpace(messageWithoutAnsi))
+            return null;
+
+        var ansiLevel = GetLevelFromAnsiColor(message);
+        if (ansiLevel is null)
+            return null;
+
+        return (
+            Level: ansiLevel,
+            Message: messageWithoutAnsi,
+            Attributes: new Dictionary<string, object?>(StringComparer.Ordinal)
+            {
+                ["annotation.source"] = "ansi",
+            });
+    }
+
+    private static (string Level, string Message, Dictionary<string, object?> Attributes)? ParseWorkflowCommandAnnotation(string message)
+    {
         var match = AnnotationRegex.Match(message);
         if (!match.Success)
             return null;
@@ -1164,6 +1193,112 @@ internal sealed partial class TraceModel
             Level: match.Groups["level"].Value.ToLowerInvariant(),
             Message: match.Groups["message"].Value,
             Attributes: attributes);
+    }
+
+    private static (string Level, string Message, Dictionary<string, object?> Attributes)? ParseLegacyAnnotation(string message)
+    {
+        var match = LegacyAnnotationRegex.Match(message);
+        if (!match.Success)
+            return null;
+
+        return (
+            Level: match.Groups["level"].Value.ToLowerInvariant(),
+            Message: match.Groups["message"].Value,
+            Attributes: new Dictionary<string, object?>(StringComparer.Ordinal));
+    }
+
+    private static string? GetLevelFromAnsiColor(string message)
+    {
+        var severity = 0;
+        var matches = AnsiSgrRegex.Matches(message);
+        foreach (Match match in matches)
+        {
+            var codesValue = match.Groups["codes"].Value;
+            if (string.IsNullOrWhiteSpace(codesValue))
+                continue;
+
+            var codes = codesValue.Split(';', StringSplitOptions.TrimEntries);
+            for (var i = 0; i < codes.Length; i++)
+            {
+                if (!int.TryParse(codes[i], NumberStyles.Integer, CultureInfo.InvariantCulture, out var code))
+                    continue;
+
+                switch (code)
+                {
+                    case 31:
+                    case 91:
+                        severity = Math.Max(severity, 2);
+                        break;
+
+                    case 33:
+                    case 93:
+                        severity = Math.Max(severity, 1);
+                        break;
+
+                    case 38 when i + 2 < codes.Length && int.TryParse(codes[i + 1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var mode):
+                        if (mode is 5 && int.TryParse(codes[i + 2], NumberStyles.Integer, CultureInfo.InvariantCulture, out var colorIndex))
+                        {
+                            severity = Math.Max(severity, GetSeverityFromAnsi256Color(colorIndex));
+                            i += 2;
+                        }
+                        else if (mode is 2
+                                 && i + 4 < codes.Length
+                                 && int.TryParse(codes[i + 2], NumberStyles.Integer, CultureInfo.InvariantCulture, out var red)
+                                 && int.TryParse(codes[i + 3], NumberStyles.Integer, CultureInfo.InvariantCulture, out var green)
+                                 && int.TryParse(codes[i + 4], NumberStyles.Integer, CultureInfo.InvariantCulture, out var blue))
+                        {
+                            severity = Math.Max(severity, GetSeverityFromRgbColor(red, green, blue));
+                            i += 4;
+                        }
+
+                        break;
+                }
+
+                if (severity is 2)
+                    return "error";
+            }
+        }
+
+        return severity switch
+        {
+            2 => "error",
+            1 => "warning",
+            _ => null,
+        };
+    }
+
+    private static int GetSeverityFromAnsi256Color(int colorIndex)
+    {
+        if (colorIndex is 1 or 9)
+            return 2;
+
+        if (colorIndex is 3 or 11)
+            return 1;
+
+        if (colorIndex is < 16 or > 231)
+            return 0;
+
+        var normalized = colorIndex - 16;
+        var blue = Ansi256ColorSteps[normalized % 6];
+        var green = Ansi256ColorSteps[(normalized / 6) % 6];
+        var red = Ansi256ColorSteps[(normalized / 36) % 6];
+        return GetSeverityFromRgbColor(red, green, blue);
+    }
+
+    private static int GetSeverityFromRgbColor(int red, int green, int blue)
+    {
+        if (red >= 160 && green <= 120 && blue <= 120)
+            return 2;
+
+        if (red >= 160 && green >= 120 && blue <= 120)
+            return 1;
+
+        return 0;
+    }
+
+    private static string StripAnsiEscapeSequences(string value)
+    {
+        return AnsiEscapeRegex.Replace(value, string.Empty);
     }
 
     private static IEnumerable<string> EnumerateLines(string text)
@@ -1222,6 +1357,15 @@ internal sealed partial class TraceModel
 
     [GeneratedRegex(@"^::(?<level>notice|warning|error)(?<props>[^:]*)::(?<message>.*)$", RegexOptions.IgnoreCase)]
     private static partial Regex AnnotationRegex { get; }
+
+    [GeneratedRegex(@"^\s*##\[(?<level>notice|warning|error)\](?<message>.*)$", RegexOptions.IgnoreCase)]
+    private static partial Regex LegacyAnnotationRegex { get; }
+
+    [GeneratedRegex(@"\x1B\[(?<codes>[0-9;]*)m")]
+    private static partial Regex AnsiSgrRegex { get; }
+
+    [GeneratedRegex(@"\x1B\[[0-?]*[ -/]*[@-~]")]
+    private static partial Regex AnsiEscapeRegex { get; }
 
     [GeneratedRegex(@"^(?<ts>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)\s(?<msg>.*)$")]
     private static partial Regex LogTimestampRegex { get; }

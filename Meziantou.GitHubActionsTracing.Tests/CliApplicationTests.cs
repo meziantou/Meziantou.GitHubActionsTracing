@@ -449,7 +449,10 @@ public sealed class CliApplicationTests
         Assert.Contains("positionTooltip(e.clientX, e.clientY);", fileContent, StringComparison.Ordinal);
         Assert.Contains("const spansById = new Map();", fileContent, StringComparison.Ordinal);
         Assert.Contains("function getSpanHierarchy(span)", fileContent, StringComparison.Ordinal);
+        Assert.Contains("function formatUtcTimestamp(epochMilliseconds)", fileContent, StringComparison.Ordinal);
         Assert.Contains("tooltip-label'>Hierarchy:</span>", fileContent, StringComparison.Ordinal);
+        Assert.Contains("tooltip-label'>Start time (UTC):</span>", fileContent, StringComparison.Ordinal);
+        Assert.Contains("tooltip-label'>End time (UTC):</span>", fileContent, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -536,6 +539,115 @@ public sealed class CliApplicationTests
 
         var testSpan = model.Spans.Single(static span => span.Kind is "test");
         Assert.Equal(1001, testSpan.JobId);
+    }
+
+    [Fact]
+    public async Task Load_ParsesWarningAndErrorFromWorkflowCommandsLegacySyntaxAndAnsiColors()
+    {
+        await using var temporaryDirectory = TemporaryDirectory.Create();
+        var fixtureDirectory = temporaryDirectory / "fixture";
+        CreateRunInfoFixtureWithAnnotationsAndAnsiColors(fixtureDirectory);
+
+        var model = TraceModel.Load(fixtureDirectory);
+
+        var stepSpan = model.Spans.Single(static span => span.Kind is "step");
+        var events = stepSpan.Events;
+
+        Assert.Equal(6, events.Count);
+
+        Assert.Contains(events, static traceEvent =>
+            traceEvent.Name is "warning"
+            && traceEvent.Message is "warning from workflow command");
+
+        Assert.Contains(events, static traceEvent =>
+            traceEvent.Name is "error"
+            && traceEvent.Message is "error from workflow command");
+
+        Assert.Contains(events, static traceEvent =>
+            traceEvent.Name is "warning"
+            && traceEvent.Message is "warning from legacy syntax");
+
+        Assert.Contains(events, static traceEvent =>
+            traceEvent.Name is "error"
+            && traceEvent.Message is "error from legacy syntax");
+
+        Assert.Contains(events, static traceEvent =>
+            traceEvent.Name is "warning"
+            && traceEvent.Message is "warning from ansi orange"
+            && traceEvent.Attributes.TryGetValue("annotation.source", out var source)
+            && source is "ansi");
+
+        Assert.Contains(events, static traceEvent =>
+            traceEvent.Name is "error"
+            && traceEvent.Message is "error from ansi red"
+            && traceEvent.Attributes.TryGetValue("annotation.source", out var source)
+            && source is "ansi");
+
+        Assert.DoesNotContain(events, static traceEvent =>
+            traceEvent.Message.Contains("cyan informational output", StringComparison.Ordinal));
+    }
+
+    private static void CreateRunInfoFixtureWithAnnotationsAndAnsiColors(FullPath fixtureDirectory)
+    {
+        var metadataDirectory = fixtureDirectory / "metadata";
+        var logsDirectory = fixtureDirectory / "logs" / "jobs";
+
+        Directory.CreateDirectory(metadataDirectory);
+        Directory.CreateDirectory(logsDirectory);
+
+        File.WriteAllText(metadataDirectory / "run.json", """
+                        {
+                            "id": 42,
+                            "name": "Sample workflow",
+                            "created_at": "2026-02-16T00:00:00Z",
+                            "run_started_at": "2026-02-16T00:00:00Z",
+                            "updated_at": "2026-02-16T00:00:10Z"
+                        }
+                        """);
+
+        File.WriteAllText(metadataDirectory / "jobs.json", """
+                        {
+                            "jobs": [
+                                {
+                                    "id": 1001,
+                                    "run_id": 42,
+                                    "name": "build",
+                                    "status": "completed",
+                                    "conclusion": "success",
+                                    "created_at": "2026-02-16T00:00:00Z",
+                                    "started_at": "2026-02-16T00:00:00Z",
+                                    "completed_at": "2026-02-16T00:00:10Z",
+                                    "steps": [
+                                        {
+                                            "number": 1,
+                                            "name": "build step",
+                                            "status": "completed",
+                                            "conclusion": "success",
+                                            "started_at": "2026-02-16T00:00:00Z",
+                                            "completed_at": "2026-02-16T00:00:10Z"
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                        """);
+
+        File.WriteAllText(metadataDirectory / "artifacts.json", """
+                        {
+                            "artifacts": []
+                        }
+                        """);
+
+        File.WriteAllText(logsDirectory / "1001.log", string.Join(Environment.NewLine,
+        [
+            "2026-02-16T00:00:01.0000000Z ::warning::warning from workflow command",
+            "2026-02-16T00:00:02.0000000Z ::error::error from workflow command",
+            "2026-02-16T00:00:03.0000000Z ##[warning]warning from legacy syntax",
+            "2026-02-16T00:00:04.0000000Z ##[error]error from legacy syntax",
+            "2026-02-16T00:00:05.0000000Z \u001b[38;5;208mwarning from ansi orange\u001b[0m",
+            "2026-02-16T00:00:06.0000000Z \u001b[31;1merror from ansi red\u001b[0m",
+            "2026-02-16T00:00:07.0000000Z \u001b[36;1mcyan informational output\u001b[0m",
+        ]) + Environment.NewLine);
     }
 
     private static void CreateRunInfoFixtureWithPreciseGroupOutsideStepDuration(FullPath fixtureDirectory)

@@ -620,6 +620,11 @@ internal sealed class HtmlTraceExporter : ITraceExporter
             return `${ms.toFixed(0)}ms`;
         }
 
+        function formatUtcTimestamp(epochMilliseconds) {
+            const value = new Date(epochMilliseconds).toISOString();
+            return value.replace('T', ' ').replace('Z', ' UTC');
+        }
+
         function getSpanHierarchy(span) {
             const parts = [];
             const visited = new Set();
@@ -838,11 +843,15 @@ internal sealed class HtmlTraceExporter : ITraceExporter
         }
 
         function showTooltip(span, mouseX, mouseY) {
+            const spanStartUtc = minTime + span.start;
+            const spanEndUtc = spanStartUtc + span.duration;
             const lines = [
                 `<div class='tooltip-title'>${span.name}</div>`,
                 `<div class='tooltip-row'><span class='tooltip-label'>Kind:</span> ${span.kind}</div>`,
                 `<div class='tooltip-row'><span class='tooltip-label'>Hierarchy:</span> ${getSpanHierarchy(span)}</div>`,
                 `<div class='tooltip-row'><span class='tooltip-label'>Duration:</span> ${formatDuration(span.duration)}</div>`,
+                `<div class='tooltip-row'><span class='tooltip-label'>Start time (UTC):</span> ${formatUtcTimestamp(spanStartUtc)}</div>`,
+                `<div class='tooltip-row'><span class='tooltip-label'>End time (UTC):</span> ${formatUtcTimestamp(spanEndUtc)}</div>`,
             ];
 
             Object.entries(span.attributes).forEach(([key, value]) => {
