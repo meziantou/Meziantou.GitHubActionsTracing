@@ -1,5 +1,6 @@
 using System.CommandLine;
 using System.CommandLine.Parsing;
+using System.IO.Compression;
 using Meziantou.Framework;
 using Meziantou.GitHubActionsTracing.Exporters;
 using OpenTelemetry.Exporter;
@@ -14,7 +15,7 @@ internal static class CliApplication
     {
         var workflowRunInputArgument = new Argument<WorkflowRunInput>("workflow-run-url-or-folder")
         {
-            Description = "URL of the GitHub Actions workflow run or a downloaded run-info folder",
+            Description = "URL of the GitHub Actions workflow run, a downloaded run-info folder, or a zip file",
             CustomParser = ParseWorkflowRunInput,
         };
 
@@ -116,7 +117,7 @@ internal static class CliApplication
             }
         });
 
-        var exportCommand = new Command("export", "Download and trace a GitHub Actions workflow run, or trace a downloaded run-info folder");
+        var exportCommand = new Command("export", "Download and trace a GitHub Actions workflow run, or trace a downloaded run-info folder or zip file");
         exportCommand.Arguments.Add(workflowRunInputArgument);
         exportCommand.Options.Add(formatOption);
         exportCommand.Options.Add(otelEndpointOption);
@@ -195,9 +196,28 @@ internal static class CliApplication
     {
         if (options.WorkflowRunFolder is not null)
         {
+            var folder = options.WorkflowRunFolder.Value;
+
+            if (File.Exists(folder) && string.Equals(Path.GetExtension(folder), ".zip", StringComparison.OrdinalIgnoreCase))
+            {
+                AppLog.Section("Extracting zip file");
+                AppLog.Info($"Input file: {folder}");
+                await using var tempDir = TemporaryDirectory.Create();
+                var extractedPath = (FullPath)tempDir;
+
+                using (var archive = ZipFile.OpenRead(folder))
+                {
+                    archive.ExtractToDirectory(extractedPath, overwriteFiles: true);
+                }
+
+                AppLog.Info($"Temporary folder: {extractedPath}");
+                await ExecuteFromDirectoryAsync(extractedPath, options);
+                return;
+            }
+
             AppLog.Section("Using local workflow run data");
-            AppLog.Info($"Input folder: {options.WorkflowRunFolder}");
-            await ExecuteFromDirectoryAsync(options.WorkflowRunFolder.Value, options);
+            AppLog.Info($"Input folder: {folder}");
+            await ExecuteFromDirectoryAsync(folder, options);
             return;
         }
 
@@ -268,7 +288,7 @@ internal static class CliApplication
     private static WorkflowRunInput ParseWorkflowRunInput(ArgumentResult result)
     {
         if (result.Tokens.Count is 0)
-            return SetError<WorkflowRunInput>(result, "Missing workflow run URL or folder path");
+            return SetError<WorkflowRunInput>(result, "Missing workflow run URL, folder path, or zip file");
 
         var value = result.Tokens[0].Value;
         if (Uri.TryCreate(value, UriKind.Absolute, out var uri) &&
@@ -281,9 +301,20 @@ internal static class CliApplication
         try
         {
             var folder = FullPath.FromPath(value);
+
+            if (File.Exists(folder))
+            {
+                if (string.Equals(Path.GetExtension(folder), ".zip", StringComparison.OrdinalIgnoreCase))
+                {
+                    return WorkflowRunInput.FromWorkflowRunFolder(folder);
+                }
+
+                return SetError<WorkflowRunInput>(result, $"File is not a zip archive: {folder}");
+            }
+
             if (!Directory.Exists(folder))
             {
-                return SetError<WorkflowRunInput>(result, $"Directory not found: {folder}");
+                return SetError<WorkflowRunInput>(result, $"Directory or file not found: {folder}");
             }
 
             return WorkflowRunInput.FromWorkflowRunFolder(folder);
