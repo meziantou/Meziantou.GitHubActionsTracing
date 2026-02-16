@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using Meziantou.Framework;
+using Microsoft.Build.Logging;
 using Microsoft.Build.Logging.StructuredLogger;
 using StructuredProperty = Microsoft.Build.Logging.StructuredLogger.Property;
 using StructuredTarget = Microsoft.Build.Logging.StructuredLogger.Target;
@@ -12,6 +13,7 @@ namespace Meziantou.GitHubActionsTracing;
 internal sealed partial class TraceModel
 {
     private static readonly JsonSerializerOptions JsonSerializerOptions = new(JsonSerializerDefaults.Web);
+    private const int BinlogVersionWithDateTimeKind = 21; // Support DateTimeKind in DateTime properties
 
     private readonly List<TraceSpan> _spans = [];
     private readonly Dictionary<string, TraceSpan> _spansById = new(StringComparer.Ordinal);
@@ -329,6 +331,18 @@ internal sealed partial class TraceModel
 
         foreach (var file in artifact.Files.Where(static f => f.Extension.Equals(".binlog", StringComparison.OrdinalIgnoreCase)))
         {
+            if (!TryGetBinlogFileFormatVersion(file, out var binlogVersion))
+            {
+                AppLog.Warning($"Cannot determine binlog file format version for '{file}', skipping file");
+                continue;
+            }
+
+            if (binlogVersion < BinlogVersionWithDateTimeKind)
+            {
+                AppLog.Warning($"Binlog '{file}' uses file format version {binlogVersion}, which does not support DateTimeKind. This file is skipped.");
+                continue;
+            }
+
             AppLog.Info($"Parsing binlog: {file}");
 
             Build build;
@@ -406,6 +420,22 @@ internal sealed partial class TraceModel
                         });
                 }
             }
+        }
+    }
+
+    private static bool TryGetBinlogFileFormatVersion(FullPath file, out int fileFormatVersion)
+    {
+        fileFormatVersion = default;
+
+        try
+        {
+            using var reader = BinaryLogReplayEventSource.OpenReader(file.Value);
+            fileFormatVersion = reader.ReadInt32();
+            return true;
+        }
+        catch
+        {
+            return false;
         }
     }
 
@@ -862,9 +892,6 @@ internal sealed partial class TraceModel
     {
         if (dateTime.Kind is DateTimeKind.Utc)
             return new DateTimeOffset(dateTime, TimeSpan.Zero);
-
-        if (dateTime.Kind is DateTimeKind.Local)
-            return new DateTimeOffset(dateTime);
 
         return new DateTimeOffset(DateTime.SpecifyKind(dateTime, DateTimeKind.Utc), TimeSpan.Zero);
     }

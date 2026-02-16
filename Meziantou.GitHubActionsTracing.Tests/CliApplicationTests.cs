@@ -11,6 +11,7 @@ namespace Meziantou.GitHubActionsTracing.Tests;
 public sealed class CliApplicationTests
 {
     private static readonly SemaphoreSlim ConsoleSemaphore = new(1, 1);
+    private const string EmbeddedFixtureFileName = "Run22048671188_Job63702111001.zip";
 
     [Fact]
     public async Task Root_Help_MatchesSnapshot()
@@ -84,7 +85,7 @@ public sealed class CliApplicationTests
     {
         await using var temporaryDirectory = TemporaryDirectory.Create();
         var fixtureDirectory = temporaryDirectory / "fixture";
-        ExtractEmbeddedFixture("Run21998208405_Job63563697544.zip", fixtureDirectory);
+        ExtractEmbeddedFixture(EmbeddedFixtureFileName, fixtureDirectory);
 
         var outputPath = temporaryDirectory / "trace.chromium.json";
         var commandResult = await InvokeCliAsync("export", fixtureDirectory.ToString(), "--chromium-path", outputPath.ToString());
@@ -127,7 +128,7 @@ public sealed class CliApplicationTests
     {
         await using var temporaryDirectory = TemporaryDirectory.Create();
         var fixtureDirectory = temporaryDirectory / "fixture";
-        ExtractEmbeddedFixture("Run21998208405_Job63563697544.zip", fixtureDirectory);
+        ExtractEmbeddedFixture(EmbeddedFixtureFileName, fixtureDirectory);
 
         var outputPath = temporaryDirectory / "trace.otel.json";
         var commandResult = await InvokeCliAsync(
@@ -171,8 +172,8 @@ public sealed class CliApplicationTests
             Assert.True(spanName is not null && spanName.StartsWith("Test: ", StringComparison.Ordinal), $"Unexpected test span name '{spanName}'");
         });
 
-        Assert.Contains(spans, span => span.TryGetProperty("events", out var events) && events.GetArrayLength() > 0);
-        Assert.Contains(spans, span => span.GetProperty("name").GetString()!.Contains("build_and_test", StringComparison.OrdinalIgnoreCase));
+        Assert.Contains(spans, span => span.TryGetProperty("events", out _));
+        Assert.Contains(spans, span => span.GetProperty("name").GetString()!.Contains("Build and Publish", StringComparison.OrdinalIgnoreCase));
 
         var spanIds = spans
             .Select(span => span.GetProperty("spanId").GetString())
@@ -190,6 +191,60 @@ public sealed class CliApplicationTests
 
             Assert.Contains(parentSpanId, spanIds);
         }
+
+        var spansById = spans
+            .Select(static span => new
+            {
+                Span = span,
+                SpanId = span.GetProperty("spanId").GetString(),
+            })
+            .Where(static item => !string.IsNullOrEmpty(item.SpanId))
+            .ToDictionary(static item => item.SpanId!, static item => item.Span, StringComparer.Ordinal);
+
+        Assert.All(testSpans, span =>
+        {
+            Assert.True(span.TryGetProperty("parentSpanId", out var parentSpanIdElement) && parentSpanIdElement.ValueKind is JsonValueKind.String,
+                "Test span must have a parent span id");
+
+            var parentSpanId = parentSpanIdElement.GetString();
+            Assert.NotNull(parentSpanId);
+            if (!spansById.TryGetValue(parentSpanId, out var parentSpan))
+            {
+                Assert.Fail($"Cannot find parent span for test span '{span.GetProperty("name").GetString()}'");
+            }
+
+            var parentKind = GetAttributeValue(parentSpan, "span.kind");
+            Assert.Equal("msbuild.task", parentKind);
+        });
+
+        var expectedHierarchy = new[] { "workflow", "job", "msbuild.target", "msbuild.task", "test" };
+        Assert.All(testSpans, span =>
+        {
+            var hierarchy = GetSpanHierarchyKinds(span, spansById);
+            Assert.True(ContainsOrderedSubsequence(hierarchy, expectedHierarchy),
+                $"Test span '{span.GetProperty("name").GetString()}' has hierarchy '{string.Join(" / ", hierarchy)}' instead of expected '{string.Join(" / ", expectedHierarchy)}'.");
+        });
+
+        var rootHelpSpan = testSpans.Single(span =>
+        {
+            var name = span.GetProperty("name").GetString();
+            return name is not null && name.EndsWith(".Root_Help_MatchesSnapshot", StringComparison.Ordinal);
+        });
+
+        var rootHelpSpanName = rootHelpSpan.GetProperty("name").GetString();
+        Assert.NotNull(rootHelpSpanName);
+        Assert.EndsWith("Root_Help_MatchesSnapshot", rootHelpSpanName, StringComparison.Ordinal);
+
+        var rootHelpHierarchyNames = GetSpanHierarchyNames(rootHelpSpan, spansById);
+        Assert.Equal(
+        [
+            "Build and Publish",
+            "build",
+            "VSTest",
+            "VSTestTask",
+            rootHelpSpanName,
+        ],
+        rootHelpHierarchyNames);
     }
 
     [Fact]
@@ -316,7 +371,7 @@ public sealed class CliApplicationTests
     private static TraceModel LoadEmbeddedFixtureModel(FullPath temporaryDirectory)
     {
         var fixtureDirectory = temporaryDirectory / "fixture";
-        ExtractEmbeddedFixture("Run21998208405_Job63563697544.zip", fixtureDirectory);
+        ExtractEmbeddedFixture(EmbeddedFixtureFileName, fixtureDirectory);
 
         return TraceModel.Load(fixtureDirectory, new TraceLoadOptions
         {
@@ -373,6 +428,73 @@ public sealed class CliApplicationTests
         }
 
         return null;
+    }
+
+    private static List<string> GetSpanHierarchyKinds(JsonElement span, Dictionary<string, JsonElement> spansById)
+    {
+        var result = new List<string>();
+        var current = span;
+
+        while (true)
+        {
+            var kind = GetAttributeValue(current, "span.kind");
+            if (kind is not null)
+            {
+                result.Add(kind);
+            }
+
+            if (!current.TryGetProperty("parentSpanId", out var parentSpanIdElement) || parentSpanIdElement.ValueKind is JsonValueKind.Null)
+                break;
+
+            var parentSpanId = parentSpanIdElement.GetString();
+            if (string.IsNullOrEmpty(parentSpanId) || !spansById.TryGetValue(parentSpanId, out current))
+                break;
+        }
+
+        result.Reverse();
+        return result;
+    }
+
+    private static List<string> GetSpanHierarchyNames(JsonElement span, Dictionary<string, JsonElement> spansById)
+    {
+        var result = new List<string>();
+        var current = span;
+
+        while (true)
+        {
+            var name = current.GetProperty("name").GetString();
+            if (!string.IsNullOrEmpty(name))
+            {
+                result.Add(name);
+            }
+
+            if (!current.TryGetProperty("parentSpanId", out var parentSpanIdElement) || parentSpanIdElement.ValueKind is JsonValueKind.Null)
+                break;
+
+            var parentSpanId = parentSpanIdElement.GetString();
+            if (string.IsNullOrEmpty(parentSpanId) || !spansById.TryGetValue(parentSpanId, out current))
+                break;
+        }
+
+        result.Reverse();
+        return result;
+    }
+
+    private static bool ContainsOrderedSubsequence(IReadOnlyList<string> source, string[] expected)
+    {
+        var expectedIndex = 0;
+
+        foreach (var item in source)
+        {
+            if (!string.Equals(item, expected[expectedIndex], StringComparison.Ordinal))
+                continue;
+
+            expectedIndex++;
+            if (expectedIndex == expected.Length)
+                return true;
+        }
+
+        return false;
     }
 
     private static string? GetAttributeValue(JsonElement span, string key)
