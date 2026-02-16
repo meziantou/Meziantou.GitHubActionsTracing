@@ -722,6 +722,18 @@ internal sealed class HtmlTraceExporter : ITraceExporter
                 visibleSpans.push({ span, x, y, width, height });
             });
 
+            const timelineSteps = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000];
+            const pixelsPerMs = zoom * getTimelineWidth() / getSafeTotalDuration();
+            let step = timelineSteps.find(s => s * pixelsPerMs > 50) || timelineSteps[timelineSteps.length - 1];
+
+            ctx.fillStyle = '#3e3e42';
+            for (let t = 0; t <= totalDuration; t += step) {
+                const x = timeToX(t);
+                if (x >= LEFT_MARGIN && x <= canvasWidth) {
+                    ctx.fillRect(x, TOP_MARGIN, 1, canvasHeight - TOP_MARGIN);
+                }
+            }
+
             const hasSearch = searchTerm.length > 0;
             visibleSpans.forEach(({ span, x, y, width, height }) => {
                 const isMatch = isSearchMatch(span);
@@ -762,10 +774,6 @@ internal sealed class HtmlTraceExporter : ITraceExporter
 
             ctx.fillStyle = '#3e3e42';
             ctx.fillRect(0, TOP_MARGIN - 30, canvasWidth, 30);
-            
-            const timelineSteps = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000];
-            const pixelsPerMs = zoom * getTimelineWidth() / getSafeTotalDuration();
-            let step = timelineSteps.find(s => s * pixelsPerMs > 50) || timelineSteps[timelineSteps.length - 1];
 
             ctx.fillStyle = '#858585';
             ctx.font = '10px sans-serif';
@@ -774,9 +782,6 @@ internal sealed class HtmlTraceExporter : ITraceExporter
                 const x = timeToX(t);
                 if (x >= LEFT_MARGIN && x <= canvasWidth) {
                     ctx.fillText(formatDuration(t), x, TOP_MARGIN - 15);
-                    ctx.fillStyle = '#3e3e42';
-                    ctx.fillRect(x, TOP_MARGIN, 1, canvasHeight - TOP_MARGIN);
-                    ctx.fillStyle = '#858585';
                 }
             }
         }
