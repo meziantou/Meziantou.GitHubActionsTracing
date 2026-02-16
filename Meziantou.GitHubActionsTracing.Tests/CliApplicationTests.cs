@@ -35,7 +35,7 @@ public sealed class CliApplicationTests
               --version       Show version information
 
             Commands:
-              export <workflow-run-url-or-folder>  Download and trace a GitHub Actions workflow run, or trace a downloaded run-info folder
+              export <workflow-run-url-or-folder>  Download and trace a GitHub Actions workflow run, or trace a downloaded run-info folder or zip file
               download-run-info <url>              Download GitHub Actions workflow run info and artifacts
 
 
@@ -55,13 +55,13 @@ public sealed class CliApplicationTests
         InlineSnapshot.Validate(actual, """
             exit=0
             Description:
-              Download and trace a GitHub Actions workflow run, or trace a downloaded run-info folder
+              Download and trace a GitHub Actions workflow run, or trace a downloaded run-info folder or zip file
 
             Usage:
               Meziantou.GitHubActionsTracing.Tests export <workflow-run-url-or-folder> [options]
 
             Arguments:
-              <workflow-run-url-or-folder>  URL of the GitHub Actions workflow run or a downloaded run-info folder
+              <workflow-run-url-or-folder>  URL of the GitHub Actions workflow run, a downloaded run-info folder, or a zip file
 
             Options:
               --format <Chromium|Otel|OtelFile|Speedscope>                                    Output format: otel, otel-file, chromium, speedscope
@@ -89,6 +89,34 @@ public sealed class CliApplicationTests
 
         var outputPath = temporaryDirectory / "trace.chromium.json";
         var commandResult = await InvokeCliAsync("export", fixtureDirectory.ToString(), "--chromium-path", outputPath.ToString());
+
+        Assert.Equal(0, commandResult.ExitCode);
+        Assert.True(File.Exists(outputPath));
+
+        var traceContent = await File.ReadAllTextAsync(outputPath, TestContext.Current.CancellationToken);
+        Assert.Contains("GitHub Actions Workflow Run", traceContent, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Export_UsesZipFile()
+    {
+        await using var temporaryDirectory = TemporaryDirectory.Create();
+        var zipPath = temporaryDirectory / "run-info.zip";
+
+        var assembly = typeof(CliApplicationTests).Assembly;
+        var resourceName = assembly
+            .GetManifestResourceNames()
+            .Single(name => name.EndsWith(EmbeddedFixtureFileName, StringComparison.Ordinal));
+
+        using (var resourceStream = assembly.GetManifestResourceStream(resourceName))
+        {
+            Assert.NotNull(resourceStream);
+            using var fileStream = File.Create(zipPath);
+            await resourceStream.CopyToAsync(fileStream, TestContext.Current.CancellationToken);
+        }
+
+        var outputPath = temporaryDirectory / "trace.chromium.json";
+        var commandResult = await InvokeCliAsync("export", zipPath.ToString(), "--chromium-path", outputPath.ToString());
 
         Assert.Equal(0, commandResult.ExitCode);
         Assert.True(File.Exists(outputPath));
