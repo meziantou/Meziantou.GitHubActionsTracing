@@ -43,6 +43,9 @@ internal sealed class HtmlTraceExporter : ITraceExporter
         var minTime = spans.Min(static span => span.StartTime);
         var maxTime = spans.Max(static span => span.EndTime);
         var totalDuration = (maxTime - minTime).TotalMilliseconds;
+        var idleDuration = ComputeIdleDurationMilliseconds(spans, minTime, maxTime);
+        var idleDurationSeconds = idleDuration / 1000;
+        var idlePercentage = totalDuration > 0 ? idleDuration / totalDuration : 0;
 
         var spansData = BuildSpansData(spans, minTime, jobs);
         var jobsData = BuildJobsData(jobs);
@@ -61,7 +64,7 @@ internal sealed class HtmlTraceExporter : ITraceExporter
         html.AppendLine("<body>");
         html.AppendLine("    <div class=\"header\">");
         html.AppendLine($"        <h1>{HtmlEncode(model.WorkflowRun.Name ?? "Workflow Run")}</h1>");
-        html.AppendLine(CultureInfo.InvariantCulture, $"        <div class=\"info\">Duration: {FormatDuration((maxTime - minTime).TotalMilliseconds)} | Spans: {spans.Count} | Jobs: {jobs.Count}</div>");
+        html.AppendLine(CultureInfo.InvariantCulture, $"        <div class=\"info\">Duration: {FormatDuration((maxTime - minTime).TotalMilliseconds)} | Idle: {idleDurationSeconds:F1}s ({idlePercentage:P1}) | Spans: {spans.Count} | Jobs: {jobs.Count}</div>");
         html.AppendLine("        <div class=\"header-controls\">");
         html.AppendLine("            <label for=\"search\">Search:</label>");
         html.AppendLine("            <input id=\"search\" class=\"search-input\" type=\"text\" placeholder=\"Span name contains...\" autocomplete=\"off\" />");
@@ -157,6 +160,51 @@ internal sealed class HtmlTraceExporter : ITraceExporter
         if (ts.TotalSeconds >= 1)
             return $"{ts.Seconds}.{ts.Milliseconds:000}s";
         return $"{ts.TotalMilliseconds:F0}ms";
+    }
+
+    private static double ComputeIdleDurationMilliseconds(List<TraceSpan> spans, DateTimeOffset minTime, DateTimeOffset maxTime)
+    {
+        if (maxTime <= minTime)
+            return 0;
+
+        var activeIntervals = spans
+            .Where(static span => !string.Equals(span.Kind, "workflow", StringComparison.Ordinal))
+            .Select(span => (
+                Start: span.StartTime < minTime ? minTime : span.StartTime,
+                End: span.EndTime > maxTime ? maxTime : span.EndTime))
+            .Where(static interval => interval.End > interval.Start)
+            .OrderBy(static interval => interval.Start)
+            .ThenBy(static interval => interval.End)
+            .ToList();
+
+        var totalDuration = (maxTime - minTime).TotalMilliseconds;
+        if (activeIntervals.Count is 0)
+            return totalDuration;
+
+        var coveredDuration = 0.0;
+        var currentStart = activeIntervals[0].Start;
+        var currentEnd = activeIntervals[0].End;
+
+        for (var i = 1; i < activeIntervals.Count; i++)
+        {
+            var interval = activeIntervals[i];
+            if (interval.Start <= currentEnd)
+            {
+                if (interval.End > currentEnd)
+                {
+                    currentEnd = interval.End;
+                }
+
+                continue;
+            }
+
+            coveredDuration += (currentEnd - currentStart).TotalMilliseconds;
+            currentStart = interval.Start;
+            currentEnd = interval.End;
+        }
+
+        coveredDuration += (currentEnd - currentStart).TotalMilliseconds;
+        return Math.Max(0, totalDuration - coveredDuration);
     }
 
     private static string GetCss()
