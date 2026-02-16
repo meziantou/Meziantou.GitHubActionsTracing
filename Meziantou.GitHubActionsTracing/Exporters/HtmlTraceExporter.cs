@@ -380,6 +380,7 @@ internal sealed class HtmlTraceExporter : ITraceExporter
 
             spansData.forEach(span => {
                 if (span.jobIndex < 0 || span.jobIndex >= jobsData.length) return;
+                if (!isSpanVisibleByFilters(span)) return;
 
                 if (!spansByLane.has(span.jobIndex)) {
                     spansByLane.set(span.jobIndex, []);
@@ -439,7 +440,7 @@ internal sealed class HtmlTraceExporter : ITraceExporter
             };
         }
 
-        const layout = buildLayout();
+        let layout = buildLayout();
 
         function getDpr() {
             return window.devicePixelRatio || 1;
@@ -629,6 +630,7 @@ internal sealed class HtmlTraceExporter : ITraceExporter
             showMsbuildTargets = !filterMsbuildTargetsInput || filterMsbuildTargetsInput.checked;
             showMsbuildTasks = !filterMsbuildTasksInput || filterMsbuildTasksInput.checked;
             showTests = !filterTestsInput || filterTestsInput.checked;
+            layout = buildLayout();
 
             updateSearchStatus();
             hoveredSpan = null;
@@ -935,6 +937,7 @@ internal sealed class HtmlTraceExporter : ITraceExporter
         showMsbuildTargets = !filterMsbuildTargetsInput || filterMsbuildTargetsInput.checked;
         showMsbuildTasks = !filterMsbuildTasksInput || filterMsbuildTasksInput.checked;
         showTests = !filterTestsInput || filterTestsInput.checked;
+        layout = buildLayout();
 
         window.addEventListener('keydown', (e) => {
             if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f' && searchInput) {
