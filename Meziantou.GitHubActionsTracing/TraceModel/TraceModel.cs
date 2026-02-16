@@ -5,6 +5,7 @@ using Meziantou.Framework;
 using Microsoft.Build.Logging;
 using Microsoft.Build.Logging.StructuredLogger;
 using StructuredProperty = Microsoft.Build.Logging.StructuredLogger.Property;
+using StructuredProject = Microsoft.Build.Logging.StructuredLogger.Project;
 using StructuredTarget = Microsoft.Build.Logging.StructuredLogger.Target;
 using StructuredTask = Microsoft.Build.Logging.StructuredLogger.Task;
 
@@ -355,6 +356,44 @@ internal sealed partial class TraceModel
                 continue;
             }
 
+            var projectSpans = new Dictionary<StructuredProject, TraceSpan>();
+            foreach (var project in EnumerateNodes<StructuredProject>(build))
+            {
+                if (project.StartTime == default || project.EndTime == default)
+                    continue;
+
+                var projectStart = ToDateTimeOffset(project.StartTime);
+                var projectEnd = ToDateTimeOffset(project.EndTime);
+                if (projectEnd < projectStart)
+                    projectEnd = projectStart;
+
+                var parentSpan = FindClosestParent(jobId.Value, projectStart, projectEnd);
+                var projectSpan = AddSpan(
+                    name: BuildProjectSpanName(project),
+                    kind: "msbuild.project",
+                    startTime: projectStart,
+                    endTime: projectEnd,
+                    parentId: parentSpan.Id,
+                    jobId: jobId,
+                    attributes: new Dictionary<string, object?>(StringComparer.Ordinal)
+                    {
+                        ["artifact.id"] = artifact.Artifact.Id,
+                        ["artifact.name"] = artifact.Artifact.Name,
+                        ["binlog.file"] = file.Value,
+                        ["project.file"] = project.ProjectFile,
+                        ["project.configuration"] = project.Configuration,
+                        ["project.platform"] = project.Platform,
+                        ["project.target_framework"] = project.TargetFramework,
+                    });
+
+                foreach (var property in artifact.Hints.CustomProperties)
+                {
+                    projectSpan.Attributes[$"binlog.property.{property.Key}"] = property.Value;
+                }
+
+                projectSpans[project] = projectSpan;
+            }
+
             foreach (var target in EnumerateNodes<StructuredTarget>(build))
             {
                 if (target.Name is null)
@@ -372,13 +411,20 @@ internal sealed partial class TraceModel
                 var targetStart = ToDateTimeOffset(target.StartTime);
                 var targetEnd = ToDateTimeOffset(target.EndTime);
                 var parentSpan = FindClosestParent(jobId.Value, targetStart, targetEnd);
+                var parentId = parentSpan.Id;
+
+                var project = GetProjectNode(target);
+                if (project is not null && projectSpans.TryGetValue(project, out var projectSpan))
+                {
+                    parentId = projectSpan.Id;
+                }
 
                 var targetSpan = AddSpan(
                     name: target.Name,
                     kind: "msbuild.target",
                     startTime: targetStart,
                     endTime: targetEnd,
-                    parentId: parentSpan.Id,
+                    parentId: parentId,
                     jobId: jobId,
                     attributes: new Dictionary<string, object?>(StringComparer.Ordinal)
                     {
@@ -420,6 +466,28 @@ internal sealed partial class TraceModel
                 }
             }
         }
+    }
+
+    private static StructuredProject? GetProjectNode(StructuredTarget target)
+    {
+        foreach (var parent in target.GetParentChainIncludingThis())
+        {
+            if (parent is StructuredProject project)
+                return project;
+        }
+
+        return null;
+    }
+
+    private static string BuildProjectSpanName(StructuredProject project)
+    {
+        if (!string.IsNullOrWhiteSpace(project.Name))
+            return project.Name;
+
+        if (!string.IsNullOrWhiteSpace(project.ProjectFile))
+            return Path.GetFileName(project.ProjectFile);
+
+        return "Project";
     }
 
     private static bool TryGetBinlogFileFormatVersion(FullPath file, out int fileFormatVersion)

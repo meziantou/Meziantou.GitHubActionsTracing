@@ -160,6 +160,7 @@ public sealed class CliApplicationTests
         Assert.Contains(spans, span => string.Equals(GetAttributeValue(span, "span.kind"), "job", StringComparison.Ordinal));
         Assert.Contains(spans, span => string.Equals(GetAttributeValue(span, "span.kind"), "step", StringComparison.Ordinal));
         Assert.Contains(spans, span => string.Equals(GetAttributeValue(span, "span.kind"), "log.group", StringComparison.Ordinal));
+        Assert.Contains(spans, span => string.Equals(GetAttributeValue(span, "span.kind"), "msbuild.project", StringComparison.Ordinal));
         Assert.Contains(spans, span => string.Equals(GetAttributeValue(span, "span.kind"), "msbuild.target", StringComparison.Ordinal));
         Assert.Contains(spans, span => string.Equals(GetAttributeValue(span, "span.kind"), "test", StringComparison.Ordinal));
 
@@ -206,6 +207,23 @@ public sealed class CliApplicationTests
             .Where(static item => !string.IsNullOrEmpty(item.SpanId))
             .ToDictionary(static item => item.SpanId!, static item => item.Span, StringComparer.Ordinal);
 
+        var targetSpans = spans
+            .Where(span => string.Equals(GetAttributeValue(span, "span.kind"), "msbuild.target", StringComparison.Ordinal))
+            .ToList();
+
+        Assert.NotEmpty(targetSpans);
+        Assert.Contains(targetSpans, targetSpan =>
+        {
+            if (!targetSpan.TryGetProperty("parentSpanId", out var parentSpanIdElement) || parentSpanIdElement.ValueKind is not JsonValueKind.String)
+                return false;
+
+            var parentSpanId = parentSpanIdElement.GetString();
+            if (string.IsNullOrEmpty(parentSpanId) || !spansById.TryGetValue(parentSpanId, out var parentSpan))
+                return false;
+
+            return string.Equals(GetAttributeValue(parentSpan, "span.kind"), "msbuild.project", StringComparison.Ordinal);
+        });
+
         Assert.True(disableAutomaticGarbageCollectionGroup.TryGetProperty("parentSpanId", out var groupParentSpanIdElement) && groupParentSpanIdElement.ValueKind is JsonValueKind.String,
             "Group span must have a parent span id");
 
@@ -233,7 +251,7 @@ public sealed class CliApplicationTests
             Assert.Equal("msbuild.task", parentKind);
         });
 
-        var expectedHierarchy = new[] { "workflow", "job", "msbuild.target", "msbuild.task", "test" };
+        var expectedHierarchy = new[] { "workflow", "job", "msbuild.project", "msbuild.target", "msbuild.task", "test" };
         Assert.All(testSpans, span =>
         {
             var hierarchy = GetSpanHierarchyKinds(span, spansById);
@@ -251,16 +269,19 @@ public sealed class CliApplicationTests
         Assert.NotNull(rootHelpSpanName);
         Assert.EndsWith("Root_Help_MatchesSnapshot", rootHelpSpanName, StringComparison.Ordinal);
 
+        var rootHelpHierarchyKinds = GetSpanHierarchyKinds(rootHelpSpan, spansById);
+        Assert.True(ContainsOrderedSubsequence(rootHelpHierarchyKinds, expectedHierarchy),
+            $"Test span '{rootHelpSpanName}' has hierarchy '{string.Join(" / ", rootHelpHierarchyKinds)}' instead of expected '{string.Join(" / ", expectedHierarchy)}'.");
+
         var rootHelpHierarchyNames = GetSpanHierarchyNames(rootHelpSpan, spansById);
-        Assert.Equal(
+        Assert.True(ContainsOrderedSubsequence(rootHelpHierarchyNames,
         [
             "Build and Publish",
             "build",
             "VSTest",
             "VSTestTask",
             rootHelpSpanName,
-        ],
-        rootHelpHierarchyNames);
+        ]));
     }
 
     [Fact]
