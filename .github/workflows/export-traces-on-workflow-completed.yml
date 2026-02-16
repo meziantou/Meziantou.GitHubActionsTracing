@@ -1,0 +1,63 @@
+name: Export workflow traces
+
+on:
+  workflow_run:
+    workflows:
+      - Build and Publish
+    types:
+      - completed
+
+env:
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: 1
+  DOTNET_NOLOGO: true
+  Configuration: Release
+
+defaults:
+  run:
+    shell: pwsh
+
+jobs:
+  export-traces:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+
+      - name: Determine workflow run URL
+        id: run
+        run: |
+          if ("${{ github.event.workflow_run.id }}") {
+            $runId = "${{ github.event.workflow_run.id }}"
+          }
+          else {
+            $runId = "${{ github.run_id }}"
+          }
+
+          "id=$runId" >> $env:GITHUB_OUTPUT
+          "url=${{ github.server_url }}/${{ github.repository }}/actions/runs/$runId" >> $env:GITHUB_OUTPUT
+
+      - name: Export workflow trace files
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Path artifacts -Force | Out-Null
+
+          dotnet run --project ./Meziantou.GitHubActionsTracing/ -- export "${{ steps.run.outputs.url }}" `
+            --chromium-path "./artifacts/trace-${{ steps.run.outputs.id }}.json" `
+            --speedscope-path "./artifacts/trace-${{ steps.run.outputs.id }}.speedscope.json" `
+            --otel-path "./artifacts/trace-${{ steps.run.outputs.id }}.otel.json"
+
+      - name: Upload trace artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: workflow-traces-${{ steps.run.outputs.id }}
+          path: |
+            ./artifacts/*.json
+          if-no-files-found: error
