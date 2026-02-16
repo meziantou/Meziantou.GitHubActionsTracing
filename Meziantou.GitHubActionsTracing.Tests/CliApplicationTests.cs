@@ -164,6 +164,16 @@ public sealed class CliApplicationTests
         Assert.Contains(spans, span => string.Equals(GetAttributeValue(span, "span.kind"), "msbuild.target", StringComparison.Ordinal));
         Assert.Contains(spans, span => string.Equals(GetAttributeValue(span, "span.kind"), "test", StringComparison.Ordinal));
 
+        var testSpans = spans
+            .Where(span => string.Equals(GetAttributeValue(span, "span.kind"), "test", StringComparison.Ordinal))
+            .ToList();
+
+        Assert.All(testSpans, static span =>
+        {
+            var spanName = span.GetProperty("name").GetString();
+            Assert.True(spanName is not null && spanName.StartsWith("Test: ", StringComparison.Ordinal), $"Unexpected test span name '{spanName}'");
+        });
+
         Assert.Contains(spans, span => span.TryGetProperty("events", out var events) && events.GetArrayLength() > 0);
         Assert.Contains(spans, span => span.GetProperty("name").GetString()!.Contains("build_and_test", StringComparison.OrdinalIgnoreCase));
 

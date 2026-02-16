@@ -473,7 +473,7 @@ internal sealed partial class TraceModel
             var parentSpan = FindClosestParent(jobId, start.Value, end.Value);
 
             AddSpan(
-                name: result.Attribute("testName")?.Value ?? "Test",
+                name: BuildTestSpanName(result.Attribute("testName")?.Value),
                 kind: "test",
                 startTime: start.Value,
                 endTime: end.Value,
@@ -540,7 +540,7 @@ internal sealed partial class TraceModel
                 var parentSpan = FindClosestParent(jobId, start, end);
 
                 AddSpan(
-                    name: testName,
+                    name: BuildTestSpanName(testName),
                     kind: "test",
                     startTime: start,
                     endTime: end,
@@ -567,6 +567,16 @@ internal sealed partial class TraceModel
         return string.IsNullOrWhiteSpace(className)
             ? testName
             : className + "." + testName;
+    }
+
+    private static string BuildTestSpanName(string? testName)
+    {
+        if (string.IsNullOrWhiteSpace(testName))
+            return "Test";
+
+        return testName.StartsWith("Test: ", StringComparison.Ordinal)
+            ? testName
+            : "Test: " + testName;
     }
 
     private static bool LooksLikeJunit(FullPath file)
