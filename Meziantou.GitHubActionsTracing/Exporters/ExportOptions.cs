@@ -18,15 +18,16 @@ internal sealed record ExportOptions(
         var chromiumPath = options.ChromiumPath;
         var speedscopePath = options.SpeedscopePath;
         var htmlPath = options.HtmlPath;
+        var hasCollectorConfigurationFromExporterEnvironment = HasCollectorConfigurationFromExporterEnvironment();
 
         if (options.Format is not null)
         {
             switch (options.Format.Value)
             {
                 case ExportFormat.Otel:
-                    if (string.IsNullOrWhiteSpace(otelEndpoint))
+                    if (string.IsNullOrWhiteSpace(otelEndpoint) && !hasCollectorConfigurationFromExporterEnvironment)
                     {
-                        throw new InvalidOperationException("--format otel requires --otel-endpoint or OTEL_EXPORTER_OTLP_ENDPOINT");
+                        throw new InvalidOperationException("--format otel requires --otel-endpoint or EXPORTER_OTEL_EXPORTER_OTLP_* environment variables");
                     }
 
                     break;
@@ -47,7 +48,7 @@ internal sealed record ExportOptions(
             }
         }
 
-        if (otelPath is null && chromiumPath is null && speedscopePath is null && htmlPath is null && string.IsNullOrWhiteSpace(otelEndpoint))
+        if (otelPath is null && chromiumPath is null && speedscopePath is null && htmlPath is null && string.IsNullOrWhiteSpace(otelEndpoint) && !hasCollectorConfigurationFromExporterEnvironment)
         {
             throw new InvalidOperationException("No exporter selected. Use --format, --otel-endpoint, --otel-path, --chromium-path, --speedscope-path, or --html-path");
         }
@@ -59,5 +60,23 @@ internal sealed record ExportOptions(
             ChromiumPath: chromiumPath,
             SpeedscopePath: speedscopePath,
             HtmlPath: htmlPath);
+    }
+
+    private static bool HasCollectorConfigurationFromExporterEnvironment()
+    {
+        foreach (System.Collections.DictionaryEntry environmentVariable in Environment.GetEnvironmentVariables())
+        {
+            if (environmentVariable.Key is not string name ||
+                environmentVariable.Value is not string value ||
+                string.IsNullOrWhiteSpace(value) ||
+                !name.StartsWith("EXPORTER_OTEL_EXPORTER_OTLP", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            return true;
+        }
+
+        return false;
     }
 }

@@ -314,6 +314,29 @@ public sealed class CliApplicationTests
     }
 
     [Fact]
+    public async Task Export_FormatOtel_UsesExporterPrefixedOtelEnvironmentVariables()
+    {
+        await using var temporaryDirectory = TemporaryDirectory.Create();
+        var fixtureDirectory = temporaryDirectory / "fixture";
+        ExtractEmbeddedFixture(EmbeddedFixtureFileName, fixtureDirectory);
+
+        using var _ = new EnvironmentVariableScope(new Dictionary<string, string?>(StringComparer.Ordinal)
+        {
+            ["OTEL_EXPORTER_OTLP_ENDPOINT"] = "invalid://not-used",
+            ["EXPORTER_OTEL_EXPORTER_OTLP_ENDPOINT"] = "http://127.0.0.1:4317",
+        });
+
+        var commandResult = await InvokeCliAsync(
+            "export",
+            fixtureDirectory.ToString(),
+            "--format",
+            "otel");
+
+        Assert.Equal(0, commandResult.ExitCode);
+        Assert.DoesNotContain("invalid://not-used", commandResult.Output, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task EmbeddedFixture_GeneratesValidChromiumTrace()
     {
         await using var temporaryDirectory = TemporaryDirectory.Create();
@@ -1001,6 +1024,28 @@ public sealed class CliApplicationTests
         }
 
         return null;
+    }
+
+    private sealed class EnvironmentVariableScope : IDisposable
+    {
+        private readonly Dictionary<string, string?> _previousValues = new(StringComparer.Ordinal);
+
+        public EnvironmentVariableScope(IReadOnlyDictionary<string, string?> values)
+        {
+            foreach (var value in values)
+            {
+                _previousValues[value.Key] = Environment.GetEnvironmentVariable(value.Key);
+                Environment.SetEnvironmentVariable(value.Key, value.Value);
+            }
+        }
+
+        public void Dispose()
+        {
+            foreach (var previousValue in _previousValues)
+            {
+                Environment.SetEnvironmentVariable(previousValue.Key, previousValue.Value);
+            }
+        }
     }
 
     private static async Task<CommandResult> InvokeCliAsync(params string[] args)

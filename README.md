@@ -34,7 +34,7 @@ Meziantou.GitHubActionsTracing export <workflow-run-url-or-folder> [options]
 Options:
 
 - `--format` selects one output format preset: `chromium`, `speedscope`, `otel`, `otel-file`.
-- `--otel-endpoint` exports to an OTLP endpoint (also supports `OTEL_EXPORTER_OTLP_ENDPOINT`).
+- `--otel-endpoint` exports to an OTLP endpoint.
 - `--otel-protocol` selects OTLP protocol (`grpc`, `http`, `http/protobuf`).
 - `--otel-path` / `--otel-file-path` writes OpenTelemetry data to a file.
 - `--chromium-path` writes Chromium trace output to a file.
@@ -43,6 +43,9 @@ Options:
 - `--minimum-binlog-duration` / `--minimum-target-duration` filters out short binlog target spans.
 - `--include-binlog` includes binlog targets and tasks (default: `true`).
 - `--include-tests` includes TRX/JUnit test spans (default: `true`).
+
+OpenTelemetry environment variables for workflow-run export use an `EXPORTER_` prefix (for example `EXPORTER_OTEL_SERVICE_NAME`, `EXPORTER_OTEL_EXPORTER_OTLP_ENDPOINT`, `EXPORTER_OTEL_EXPORTER_OTLP_PROTOCOL`).
+This keeps exporter settings isolated from the host service/runtime `OTEL_*` configuration, which can point to a different collector.
 
 Examples:
 
@@ -64,12 +67,12 @@ Meziantou.GitHubActionsTracing export ./run-info --chromium-path trace.json
 ```
 
 ```bash
-export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
+export EXPORTER_OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
 Meziantou.GitHubActionsTracing export https://github.com/OWNER/REPO/actions/runs/123456 --format otel
 ```
 
 ```powershell
-$env:OTEL_EXPORTER_OTLP_ENDPOINT = "http://localhost:4317"
+$env:EXPORTER_OTEL_EXPORTER_OTLP_ENDPOINT = "http://localhost:4317"
 Meziantou.GitHubActionsTracing export https://github.com/OWNER/REPO/actions/runs/123456 --format otel
 ```
 

@@ -1,16 +1,12 @@
 using System.CommandLine;
 using System.CommandLine.Parsing;
-using System.IO.Compression;
 using Meziantou.Framework;
-using Meziantou.GitHubActionsTracing.Exporters;
 using OpenTelemetry.Exporter;
 
 namespace Meziantou.GitHubActionsTracing;
 
 internal static class CliApplication
 {
-    private const string OTelEndpointEnvironmentVariable = "OTEL_EXPORTER_OTLP_ENDPOINT";
-
     public static async Task<int> RunAsync(string[] args)
     {
         var workflowRunInputArgument = new Argument<WorkflowRunInput>("workflow-run-url-or-folder")
@@ -154,15 +150,11 @@ internal static class CliApplication
                 var includeBinlog = parseResult.GetValue(includeBinlogOption);
                 var includeTests = parseResult.GetValue(includeTestsOption);
 
-                var effectiveOtelEndpoint = string.IsNullOrWhiteSpace(otelEndpoint)
-                    ? Environment.GetEnvironmentVariable(OTelEndpointEnvironmentVariable)
-                    : otelEndpoint;
-
                 var options = new ApplicationOptions(
                     WorkflowRunUrl: workflowRunInput.WorkflowRunUrl,
                     WorkflowRunFolder: workflowRunInput.WorkflowRunFolder,
                     Format: format,
-                    OtelEndpoint: effectiveOtelEndpoint,
+                    OtelEndpoint: otelEndpoint,
                     OtelProtocol: otelProtocol,
                     OtelPath: otelPath,
                     ChromiumPath: chromiumPath,
@@ -173,7 +165,7 @@ internal static class CliApplication
                     IncludeBinlog: includeBinlog,
                     IncludeTests: includeTests);
 
-                await ExecuteAsync(options, cancellationToken);
+                await WorkflowRunProcessor.ProcessAsync(options, cancellationToken);
                 return 0;
             }
             catch (Exception ex)
@@ -199,93 +191,6 @@ internal static class CliApplication
             Console.Error.WriteLine($"Fatal error: {ex.Message}");
             return 1;
         }
-    }
-
-    private static async Task ExecuteAsync(ApplicationOptions options, CancellationToken cancellationToken)
-    {
-        if (options.WorkflowRunFolder is not null)
-        {
-            var folder = options.WorkflowRunFolder.Value;
-
-            if (File.Exists(folder) && string.Equals(Path.GetExtension(folder), ".zip", StringComparison.OrdinalIgnoreCase))
-            {
-                AppLog.Section("Extracting zip file");
-                AppLog.Info($"Input file: {folder}");
-                await using var tempDir = TemporaryDirectory.Create();
-                var extractedPath = (FullPath)tempDir;
-
-                using (var archive = ZipFile.OpenRead(folder))
-                {
-                    archive.ExtractToDirectory(extractedPath, overwriteFiles: true);
-                }
-
-                AppLog.Info($"Temporary folder: {extractedPath}");
-                await ExecuteFromDirectoryAsync(extractedPath, options);
-                return;
-            }
-
-            AppLog.Section("Using local workflow run data");
-            AppLog.Info($"Input folder: {folder}");
-            await ExecuteFromDirectoryAsync(folder, options);
-            return;
-        }
-
-        if (options.WorkflowRunUrl is null)
-        {
-            throw new InvalidOperationException("Missing workflow run URL or folder path");
-        }
-
-        AppLog.Section("Downloading workflow run data");
-        await using var temporaryDirectory = TemporaryDirectory.Create();
-
-        var downloadedPath = await GitHubRunDownloader.DownloadAsync(options.WorkflowRunUrl, temporaryDirectory, cancellationToken);
-        AppLog.Info($"Temporary folder: {downloadedPath}");
-
-        await ExecuteFromDirectoryAsync(downloadedPath, options);
-    }
-
-    private static async Task ExecuteFromDirectoryAsync(FullPath path, ApplicationOptions options)
-    {
-        AppLog.Section("Creating trace model");
-        var traceModel = TraceModel.Load(path, new TraceLoadOptions
-        {
-            IncludeBinlog = options.IncludeBinlog,
-            IncludeTests = options.IncludeTests,
-            MinimumBinlogDuration = options.MinimumBinlogDuration,
-            MinimumTestDuration = options.MinimumTestDuration,
-        });
-
-        AppLog.Section("Exporting trace");
-        var exportOptions = ExportOptions.Create(traceModel, options);
-        var exporters = CreateTraceExporters(exportOptions);
-        await TraceExporter.ExportAsync(traceModel, exporters);
-    }
-
-    private static List<ITraceExporter> CreateTraceExporters(ExportOptions options)
-    {
-        var exporters = new List<ITraceExporter>();
-
-        if (options.ChromiumPath is not null)
-        {
-            exporters.Add(new ChromiumTraceExporter(options.ChromiumPath.Value));
-        }
-
-        if (options.SpeedscopePath is not null)
-        {
-            exporters.Add(new SpeedscopeTraceExporter(options.SpeedscopePath.Value));
-        }
-
-        if (options.HtmlPath is not null)
-        {
-            exporters.Add(new HtmlTraceExporter(options.HtmlPath.Value));
-        }
-
-        if (!string.IsNullOrWhiteSpace(options.OtelEndpoint) || options.OtelPath is not null)
-        {
-            exporters.Add(new OpenTelemetryTraceExporter(options.OtelEndpoint, options.OtelProtocol, options.OtelPath));
-        }
-
-        return exporters;
     }
 
     private static Uri ParseWorkflowRunUri(ArgumentResult result)
