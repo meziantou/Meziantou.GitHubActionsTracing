@@ -67,7 +67,7 @@ public sealed class CliApplicationTests
               --format <Chromium|Html|Otel|OtelFile|Speedscope>                               Output format: otel, otel-file, chromium, speedscope, html
               --otel-endpoint <otel-endpoint>                                                 OpenTelemetry collector endpoint
               --otel-protocol <Grpc|HttpProtobuf>                                             OpenTelemetry protocol: grpc, http, http/protobuf [default: Grpc]
-              --otel-file-path, --otel-path <otel-path>                                       Export OpenTelemetry data to a file
+              --otel-file-path <otel-file-path>                                               Export OpenTelemetry data to a file
               --chromium-path <chromium-path>                                                 Export trace to Chromium format file
               --speedscope-path <speedscope-path>                                             Export trace to Speedscope format file
               --html-path <html-path>                                                         Export trace to HTML file with interactive swimlanes
