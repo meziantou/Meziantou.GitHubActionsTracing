@@ -11,7 +11,7 @@ internal sealed record ExportOptions(
     FullPath? SpeedscopePath,
     FullPath? HtmlPath)
 {
-    public static ExportOptions Create(TraceModel model, ApplicationOptions options)
+    public static ExportOptions Create(TraceModel model, global::Meziantou.GitHubActionsTracing.ExportOptions options)
     {
         var otelEndpoint = options.OtelEndpoint;
         var otelPath = options.OtelPath;

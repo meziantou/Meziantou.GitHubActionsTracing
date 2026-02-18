@@ -20,7 +20,7 @@ if (string.IsNullOrWhiteSpace(startupOptions.WebhookSecret))
     app.Logger.LogWarning("{SectionName}:WebhookSecret is not configured. Incoming webhook payloads will not be authenticated.", WebhookProcessingOptions.SectionName);
 }
 
-app.MapGet("/", () => "Hello");
+app.MapGet("/", () => TypedResults.Ok());
 
 app.MapPost("/webhooks/github", async (
     HttpRequest request,

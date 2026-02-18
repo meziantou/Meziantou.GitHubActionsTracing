@@ -6,7 +6,7 @@ using Meziantou.Framework;
 
 namespace Meziantou.GitHubActionsTracing;
 
-internal static class GitHubRunDownloader
+public static class GitHubRunDownloader
 {
     private const int PageSize = 100;
     private static readonly HttpClient GitHubHttpClient = CreateGitHubHttpClient();

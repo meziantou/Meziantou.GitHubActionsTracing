@@ -1,6 +1,6 @@
 namespace Meziantou.GitHubActionsTracing;
 
-internal static class AppLog
+public static class AppLog
 {
     public static void Section(string message)
     {

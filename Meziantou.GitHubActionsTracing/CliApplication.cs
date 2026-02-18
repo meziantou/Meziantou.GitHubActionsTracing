@@ -33,7 +33,7 @@ internal static class CliApplication
             CustomParser = ParseOtelProtocol,
         };
 
-        var otelPathOption = new Option<FullPath?>("--otel-path", "--otel-file-path")
+        var otelPathOption = new Option<FullPath?>("--otel-file-path")
         {
             Description = "Export OpenTelemetry data to a file",
             CustomParser = ParseNullableFullPath,
@@ -150,7 +150,7 @@ internal static class CliApplication
                 var includeBinlog = parseResult.GetValue(includeBinlogOption);
                 var includeTests = parseResult.GetValue(includeTestsOption);
 
-                var options = new ApplicationOptions(
+                var options = new ExportOptions(
                     WorkflowRunUrl: workflowRunInput.WorkflowRunUrl,
                     WorkflowRunFolder: workflowRunInput.WorkflowRunFolder,
                     Format: format,

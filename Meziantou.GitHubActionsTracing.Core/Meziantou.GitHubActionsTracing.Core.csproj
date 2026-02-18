@@ -1,0 +1,17 @@
+<Project Sdk="Meziantou.NET.Sdk">
+
+  <ItemGroup>
+    <PackageReference Include="Meziantou.Framework.ChromiumTracing" Version="1.0.10" />
+    <PackageReference Include="Meziantou.Framework.FullPath" Version="1.1.15" />
+    <PackageReference Include="Meziantou.Framework.TemporaryDirectory" Version="1.0.34" />
+    <PackageReference Include="Microsoft.Build" Version="18.3.3" />
+    <PackageReference Include="MSBuild.StructuredLogger" Version="2.3.113" />
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.15.0" />
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.15.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Meziantou.GitHubActionsTracing.Tests" />
+  </ItemGroup>
+
+</Project>

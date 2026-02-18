@@ -1,9 +1,3 @@
-#nullable enable
-#if NETFRAMEWORK
-using System.Net.Http;
-#endif
-using System.Diagnostics.CodeAnalysis;
-
 namespace Meziantou.Framework;
 
 internal static class SharedHttpClient
@@ -13,15 +7,11 @@ internal static class SharedHttpClient
     [SuppressMessage("Reliability", "CA2000:Dispose objects before losing scope", Justification = "False-positive")]
     public static HttpClient CreateHttpClient()
     {
-#if NET
         var socketHandler = new SocketsHttpHandler()
         {
             PooledConnectionIdleTimeout = TimeSpan.FromMinutes(1),
             PooledConnectionLifetime = TimeSpan.FromMinutes(1),
         };
-#else
-        var socketHandler = new HttpClientHandler();
-#endif
 
         return new HttpClient(new HttpRetryMessageHandler(socketHandler), disposeHandler: true);
     }

@@ -3,7 +3,7 @@ using OpenTelemetry.Exporter;
 
 namespace Meziantou.GitHubActionsTracing;
 
-internal sealed record ApplicationOptions(
+public sealed record ExportOptions(
     Uri? WorkflowRunUrl,
     FullPath? WorkflowRunFolder,
     ExportFormat? Format,

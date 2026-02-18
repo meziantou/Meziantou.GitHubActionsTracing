@@ -1,6 +1,6 @@
 namespace Meziantou.GitHubActionsTracing;
 
-internal sealed class TraceEvent
+public sealed class TraceEvent
 {
     public string Name { get; init; } = string.Empty;
 

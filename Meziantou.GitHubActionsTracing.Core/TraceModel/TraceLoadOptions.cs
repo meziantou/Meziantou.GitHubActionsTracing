@@ -1,6 +1,6 @@
 namespace Meziantou.GitHubActionsTracing;
 
-internal sealed class TraceLoadOptions
+public sealed class TraceLoadOptions
 {
     public bool IncludeBinlog { get; init; } = true;
 

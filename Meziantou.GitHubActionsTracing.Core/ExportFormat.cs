@@ -1,6 +1,6 @@
 namespace Meziantou.GitHubActionsTracing;
 
-internal enum ExportFormat
+public enum ExportFormat
 {
     Otel,
     OtelFile,

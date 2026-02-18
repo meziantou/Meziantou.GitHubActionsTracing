@@ -1,6 +1,6 @@
 namespace Meziantou.GitHubActionsTracing;
 
-internal sealed class TraceSpan
+public sealed class TraceSpan
 {
     public string Id { get; init; } = null!;
 

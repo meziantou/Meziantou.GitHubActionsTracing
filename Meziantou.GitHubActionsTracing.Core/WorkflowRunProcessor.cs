@@ -1,12 +1,13 @@
 using System.IO.Compression;
 using Meziantou.Framework;
 using Meziantou.GitHubActionsTracing.Exporters;
+using TraceExportOptions = Meziantou.GitHubActionsTracing.Exporters.ExportOptions;
 
 namespace Meziantou.GitHubActionsTracing;
 
-internal static class WorkflowRunProcessor
+public static class WorkflowRunProcessor
 {
-    public static async Task ProcessAsync(ApplicationOptions options, CancellationToken cancellationToken)
+    public static async Task ProcessAsync(ExportOptions options, CancellationToken cancellationToken)
     {
         if (options.WorkflowRunFolder is not null)
         {
@@ -49,7 +50,7 @@ internal static class WorkflowRunProcessor
         await ProcessFromDirectoryAsync(downloadedPath, options);
     }
 
-    private static async Task ProcessFromDirectoryAsync(FullPath path, ApplicationOptions options)
+    private static async Task ProcessFromDirectoryAsync(FullPath path, ExportOptions options)
     {
         AppLog.Section("Creating trace model");
         var traceModel = TraceModel.Load(path, new TraceLoadOptions
@@ -61,12 +62,12 @@ internal static class WorkflowRunProcessor
         });
 
         AppLog.Section("Exporting trace");
-        var exportOptions = ExportOptions.Create(traceModel, options);
+        var exportOptions = TraceExportOptions.Create(traceModel, options);
         var exporters = CreateTraceExporters(exportOptions);
         await TraceExporter.ExportAsync(traceModel, exporters);
     }
 
-    private static List<ITraceExporter> CreateTraceExporters(ExportOptions options)
+    private static List<ITraceExporter> CreateTraceExporters(TraceExportOptions options)
     {
         var exporters = new List<ITraceExporter>();
 

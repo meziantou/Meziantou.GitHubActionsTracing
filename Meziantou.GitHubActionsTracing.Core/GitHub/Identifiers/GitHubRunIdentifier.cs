@@ -1,7 +1,27 @@
 namespace Meziantou.GitHubActionsTracing;
 
-internal readonly record struct GitHubRunIdentifier(string Owner, string Repository, long RunId)
+public readonly record struct GitHubRunIdentifier(string Owner, string Repository, long RunId)
 {
+    public static bool TryParse(Uri uri, out GitHubRunIdentifier runIdentifier)
+    {
+        runIdentifier = default;
+
+        if (!uri.Host.Equals("github.com", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        var segments = uri.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Length < 5 || !segments[2].Equals("actions", StringComparison.OrdinalIgnoreCase) || !segments[3].Equals("runs", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (!long.TryParse(segments[4], CultureInfo.InvariantCulture, out var runId))
+            return false;
+
+        runIdentifier = new GitHubRunIdentifier(segments[0], segments[1], runId);
+        return true;
+    }
+
     public static GitHubRunIdentifier Parse(Uri uri)
     {
         if (!uri.Host.Equals("github.com", StringComparison.OrdinalIgnoreCase))

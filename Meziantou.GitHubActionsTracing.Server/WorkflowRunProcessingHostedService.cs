@@ -48,23 +48,24 @@ internal sealed class WorkflowRunProcessingHostedService(
     private async Task ProcessWorkflowRunAsync(WorkflowRunProcessingItem item, CancellationToken cancellationToken)
     {
         var options = optionsAccessor.CurrentValue;
-        var applicationOptions = CreateApplicationOptions(item.WorkflowRunUrl, options);
+        var exportOptions = CreateExportOptions(item.WorkflowRunUrl, options);
 
         logger.LogInformation("Processing workflow run {WorkflowRunUrl} (delivery: {DeliveryId})", item.WorkflowRunUrl, item.DeliveryId);
-        await WorkflowRunProcessor.ProcessAsync(applicationOptions, cancellationToken);
+        await WorkflowRunProcessor.ProcessAsync(exportOptions, cancellationToken);
         logger.LogInformation("Completed workflow run {WorkflowRunUrl} (delivery: {DeliveryId})", item.WorkflowRunUrl, item.DeliveryId);
     }
 
-    private ApplicationOptions CreateApplicationOptions(Uri workflowRunUrl, WebhookProcessingOptions options)
+    private ExportOptions CreateExportOptions(Uri workflowRunUrl, WebhookProcessingOptions options)
     {
-        var otelPath = TryParseFullPath(options.OtelPath, nameof(options.OtelPath));
-        var chromiumPath = TryParseFullPath(options.ChromiumPath, nameof(options.ChromiumPath));
-        var speedscopePath = TryParseFullPath(options.SpeedscopePath, nameof(options.SpeedscopePath));
-        var htmlPath = TryParseFullPath(options.HtmlPath, nameof(options.HtmlPath));
+        var workflowRunId = GitHubRunIdentifier.TryParse(workflowRunUrl, out var runIdentifier) ? runIdentifier.RunId : (long?)null;
+        var otelPath = ResolveOutputPath(options.OtelPath, nameof(options.OtelPath), workflowRunId, ".otel.json");
+        var chromiumPath = ResolveOutputPath(options.ChromiumPath, nameof(options.ChromiumPath), workflowRunId, ".chromium.json");
+        var speedscopePath = ResolveOutputPath(options.SpeedscopePath, nameof(options.SpeedscopePath), workflowRunId, ".speedscope.json");
+        var htmlPath = ResolveOutputPath(options.HtmlPath, nameof(options.HtmlPath), workflowRunId, ".html");
 
         var format = GetExportFormat(options, otelPath);
 
-        return new ApplicationOptions(
+        return new ExportOptions(
             WorkflowRunUrl: workflowRunUrl,
             WorkflowRunFolder: null,
             Format: format,
@@ -78,6 +79,50 @@ internal sealed class WorkflowRunProcessingHostedService(
             MinimumBinlogDuration: options.MinimumBinlogDuration,
             IncludeBinlog: options.IncludeBinlog,
             IncludeTests: options.IncludeTests);
+    }
+
+    private FullPath? ResolveOutputPath(string? configuredPath, string optionName, long? workflowRunId, string extension)
+    {
+        var parsedPath = TryParseFullPath(configuredPath, optionName);
+        if (parsedPath is null)
+        {
+            return null;
+        }
+
+        var path = parsedPath.Value;
+        if (IsFilePath(configuredPath!, path))
+        {
+            return path;
+        }
+
+        if (workflowRunId is null)
+        {
+            logger.LogWarning("Cannot infer workflow run id from URL. Value configured for {OptionName} is treated as a file path: {Path}", optionName, path);
+            return path;
+        }
+
+        return path / string.Create(CultureInfo.InvariantCulture, $"{workflowRunId}{extension}");
+    }
+
+    private static bool IsFilePath(string configuredPath, FullPath path)
+    {
+        if (File.Exists(path))
+        {
+            return true;
+        }
+
+        if (Directory.Exists(path))
+        {
+            return false;
+        }
+
+        var lastCharacter = configuredPath[^1];
+        if (lastCharacter == Path.DirectorySeparatorChar || lastCharacter == Path.AltDirectorySeparatorChar)
+        {
+            return false;
+        }
+
+        return !string.IsNullOrEmpty(Path.GetExtension(path));
     }
 
     private static ExportFormat? GetExportFormat(WebhookProcessingOptions options, FullPath? otelPath)
