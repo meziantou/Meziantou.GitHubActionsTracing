@@ -163,7 +163,7 @@ public sealed class CliApplicationTests
         var commandResult = await InvokeCliAsync(
             "export",
             fixtureDirectory.ToString(),
-            "--otel-path",
+            "--otel-file-path",
             outputPath.ToString(),
             "--include-binlog",
             "--include-tests",
