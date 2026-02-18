@@ -114,8 +114,11 @@ dotnet run --project .\Meziantou.GitHubActionsTracing.WebApi\
 The webhook endpoint is:
 
 - `POST /webhooks/github`
+- `POST /workflow-runs`
 
 The API accepts `workflow_run` webhooks and queues runs when `action` is `completed`.
+You can also queue a run manually by calling `POST /workflow-runs` with a JSON body such as
+`{"workflowRunUrl":"https://github.com/OWNER/REPO/actions/runs/123456","deliveryId":"manual-request"}`.
 Processing runs are exported using the same trace pipeline as the CLI.
 
 Configuration is bound from `GitHubActionsTracingWebhook` using standard ASP.NET Core configuration sources (`appsettings*.json`, environment variables, command line, etc.).

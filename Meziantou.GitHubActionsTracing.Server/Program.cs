@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Meziantou.GitHubActionsTracing;
 using Meziantou.GitHubActionsTracing.Server;
 using Microsoft.Extensions.Options;
 
@@ -21,6 +22,35 @@ if (string.IsNullOrWhiteSpace(startupOptions.WebhookSecret))
 }
 
 app.MapGet("/", () => TypedResults.Ok());
+
+app.MapPost("/workflow-runs", async (
+    WorkflowRunProcessingRequest request,
+    IWorkflowRunProcessingQueue queue,
+    ILoggerFactory loggerFactory,
+    CancellationToken cancellationToken) =>
+{
+    var logger = loggerFactory.CreateLogger("WorkflowRunRequest");
+
+    if (string.IsNullOrWhiteSpace(request.WorkflowRunUrl))
+    {
+        return Results.BadRequest(new WebhookResponse("error", "Missing workflow run URL"));
+    }
+
+    if (!Uri.TryCreate(request.WorkflowRunUrl, UriKind.Absolute, out var workflowRunUrl))
+    {
+        return Results.BadRequest(new WebhookResponse("error", "Invalid workflow run URL. Expected format: https://github.com/{owner}/{repo}/actions/runs/{id}"));
+    }
+
+    if (!GitHubRunIdentifier.TryParse(workflowRunUrl, out _))
+    {
+        return Results.BadRequest(new WebhookResponse("error", "Invalid workflow run URL. Expected format: https://github.com/{owner}/{repo}/actions/runs/{id}"));
+    }
+
+    await queue.EnqueueAsync(new WorkflowRunProcessingItem(workflowRunUrl, request.DeliveryId), cancellationToken);
+
+    logger.LogInformation("Workflow run {WorkflowRunUrl} queued (delivery: {DeliveryId})", workflowRunUrl, request.DeliveryId);
+    return Results.Accepted(value: new WebhookResponse("queued", workflowRunUrl.AbsoluteUri));
+});
 
 app.MapPost("/webhooks/github", async (
     HttpRequest request,
