@@ -137,10 +137,32 @@ Use these keys in `appsettings.json`:
 - `GitHubActionsTracingWebhook:MaxDegreeOfParallelism`: max number of workflow runs processed in parallel (default: `1`)
 - `GitHubActionsTracingWebhook:MinimumTestDuration`: e.g. `00:00:01`
 - `GitHubActionsTracingWebhook:MinimumBinlogDuration`: e.g. `00:00:01`
+- `GitHubActionsTracingWebhook:AllowedRepositoriesExact`: optional list of exact repository names (`owner/repo`)
+- `GitHubActionsTracingWebhook:AllowedRepositoriesPatterns`: optional list of regex patterns matched against `owner/repo`
+
+When at least one allow-list entry is configured, repositories not matching any exact value/pattern are ignored.
+
+Example:
+
+```json
+{
+	"GitHubActionsTracingWebhook": {
+		"AllowedRepositoriesExact": [
+			"meziantou/Meziantou.GitHubActionsTracing"
+		],
+		"AllowedRepositoriesPatterns": [
+			"^meziantou/(.*)$",
+			"^sample/abc-"
+		]
+	}
+}
+```
 
 For environment variables, replace `:` with `__` (double underscore), for example:
 
 - `GitHubActionsTracingWebhook__WebhookSecret`
 - `GitHubActionsTracingWebhook__OtelEndpoint`
+- `GitHubActionsTracingWebhook__AllowedRepositoriesExact__0`
+- `GitHubActionsTracingWebhook__AllowedRepositoriesPatterns__0`
 
 OpenTelemetry exporter environment variables with the `EXPORTER_` prefix (for example `EXPORTER_OTEL_EXPORTER_OTLP_ENDPOINT`, `EXPORTER_OTEL_EXPORTER_OTLP_PROTOCOL`, `EXPORTER_OTEL_SERVICE_NAME`) are still supported by the exporter pipeline.

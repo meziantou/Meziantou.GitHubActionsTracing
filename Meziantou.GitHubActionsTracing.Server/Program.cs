@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using Meziantou.GitHubActionsTracing;
 using Meziantou.GitHubActionsTracing.Server;
@@ -21,11 +22,15 @@ if (string.IsNullOrWhiteSpace(startupOptions.WebhookSecret))
     app.Logger.LogWarning("{SectionName}:WebhookSecret is not configured. Incoming webhook payloads will not be authenticated.", WebhookProcessingOptions.SectionName);
 }
 
+// Initialize the filter at startup
+_ = startupOptions.GetRepositoryFilter();
+
 app.MapGet("/", () => TypedResults.Ok());
 
 app.MapPost("/workflow-runs", async (
     WorkflowRunProcessingRequest request,
     IWorkflowRunProcessingQueue queue,
+    IOptions<WebhookProcessingOptions> optionsAccessor,
     ILoggerFactory loggerFactory,
     CancellationToken cancellationToken) =>
 {
@@ -41,9 +46,16 @@ app.MapPost("/workflow-runs", async (
         return Results.BadRequest(new WebhookResponse("error", "Invalid workflow run URL. Expected format: https://github.com/{owner}/{repo}/actions/runs/{id}"));
     }
 
-    if (!GitHubRunIdentifier.TryParse(workflowRunUrl, out _))
+    if (!GitHubRunIdentifier.TryParse(workflowRunUrl, out var runIdentifier))
     {
         return Results.BadRequest(new WebhookResponse("error", "Invalid workflow run URL. Expected format: https://github.com/{owner}/{repo}/actions/runs/{id}"));
+    }
+
+    var repositoryFullName = string.Create(CultureInfo.InvariantCulture, $"{runIdentifier.Owner}/{runIdentifier.Repository}");
+    if (!optionsAccessor.Value.GetRepositoryFilter().IsAllowed(runIdentifier))
+    {
+        logger.LogInformation("Workflow run {WorkflowRunUrl} ignored because repository {Repository} is not allowed (delivery: {DeliveryId})", workflowRunUrl, repositoryFullName, request.DeliveryId);
+        return Results.Ok(new WebhookResponse("ignored", string.Create(CultureInfo.InvariantCulture, $"Repository '{repositoryFullName}' is not allowed")));
     }
 
     await queue.EnqueueAsync(new WorkflowRunProcessingItem(workflowRunUrl, request.DeliveryId), cancellationToken);
@@ -89,6 +101,18 @@ app.MapPost("/webhooks/github", async (
     if (workflowRunUrl is null)
     {
         return Results.BadRequest(new WebhookResponse("error", "Unable to resolve workflow run URL from payload"));
+    }
+
+    if (!GitHubRunIdentifier.TryParse(workflowRunUrl, out var runIdentifier))
+    {
+        return Results.BadRequest(new WebhookResponse("error", "Invalid workflow run URL. Expected format: https://github.com/{owner}/{repo}/actions/runs/{id}"));
+    }
+
+    var repositoryFullName = string.Create(CultureInfo.InvariantCulture, $"{runIdentifier.Owner}/{runIdentifier.Repository}");
+    if (!optionsAccessor.Value.GetRepositoryFilter().IsAllowed(runIdentifier))
+    {
+        logger.LogInformation("Workflow run {WorkflowRunUrl} ignored because repository {Repository} is not allowed (delivery: {DeliveryId})", workflowRunUrl, repositoryFullName, request.Headers["X-GitHub-Delivery"].ToString());
+        return Results.Ok(new WebhookResponse("ignored", string.Create(CultureInfo.InvariantCulture, $"Repository '{repositoryFullName}' is not allowed")));
     }
 
     var deliveryId = request.Headers["X-GitHub-Delivery"].ToString();

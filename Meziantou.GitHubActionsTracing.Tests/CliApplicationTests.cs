@@ -81,6 +81,65 @@ public sealed class CliApplicationTests
             """);
     }
 
+    [Theory]
+    [InlineData("meziantou/Meziantou.GitHubActionsTracing", true)]
+    [InlineData("meziantou/another-repository", false)]
+    public void GitHubRepositoryFilter_ExactMatch(string repositoryFullName, bool expected)
+    {
+        var filter = new GitHubRepositoryFilter(
+            allowedRepositoriesExact: ["meziantou/Meziantou.GitHubActionsTracing"],
+            allowedRepositoriesPatterns: []);
+
+        Assert.Equal(expected, filter.IsAllowed(repositoryFullName));
+    }
+
+    [Fact]
+    public void GitHubRepositoryFilter_InvalidExactRepositories_AreIgnored()
+    {
+        var filter = new GitHubRepositoryFilter(
+            allowedRepositoriesExact: ["invalid", "owner/", "/repo", "owner/repo/extra", " owner/repo "],
+            allowedRepositoriesPatterns: []);
+
+        Assert.True(filter.IsEnabled);
+        Assert.True(filter.IsAllowed("owner/repo"));
+        Assert.False(filter.IsAllowed("owner/other"));
+    }
+
+    [Theory]
+    [InlineData("meziantou/repo1", true)]
+    [InlineData("sample/abc-test", true)]
+    [InlineData("sample/def", false)]
+    public void GitHubRepositoryFilter_PatternMatch(string repositoryFullName, bool expected)
+    {
+        var filter = new GitHubRepositoryFilter(
+            allowedRepositoriesExact: [],
+            allowedRepositoriesPatterns: ["^meziantou/(.*)$", "^sample/abc-"]);
+
+        Assert.Equal(expected, filter.IsAllowed(repositoryFullName));
+    }
+
+    [Fact]
+    public void GitHubRepositoryFilter_WithoutRules_AllowsEverything()
+    {
+        var filter = new GitHubRepositoryFilter(
+            allowedRepositoriesExact: [],
+            allowedRepositoriesPatterns: []);
+
+        Assert.True(filter.IsAllowed("meziantou/repo1"));
+        Assert.True(filter.IsAllowed("sample/repo2"));
+    }
+
+    [Fact]
+    public void GitHubRepositoryFilter_InvalidPattern_Throws()
+    {
+        var exception = Assert.Throws<ArgumentException>(() =>
+            new GitHubRepositoryFilter(
+                allowedRepositoriesExact: [],
+                allowedRepositoriesPatterns: ["("]));
+
+        Assert.Contains("Invalid repository pattern", exception.Message, StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task Export_UsesDownloadedFolder()
     {
