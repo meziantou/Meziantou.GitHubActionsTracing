@@ -100,3 +100,44 @@ Meziantou.GitHubActionsTracing download-run-info https://github.com/OWNER/REPO/a
 ```
 
 A workflow job URL resolves to the same workflow run and downloads the full run data.
+
+## Web API webhook receiver
+
+An application is available in [Meziantou.GitHubActionsTracing.WebApi/](Meziantou.GitHubActionsTracing.WebApi).
+
+Run it from source:
+
+```powershell
+dotnet run --project .\Meziantou.GitHubActionsTracing.WebApi\
+```
+
+The webhook endpoint is:
+
+- `POST /webhooks/github`
+
+The API accepts `workflow_run` webhooks and queues runs when `action` is `completed`.
+Processing runs are exported using the same trace pipeline as the CLI.
+
+Configuration is bound from `GitHubActionsTracingWebhook` using standard ASP.NET Core configuration sources (`appsettings*.json`, environment variables, command line, etc.).
+
+Use these keys in `appsettings.json`:
+
+- `GitHubActionsTracingWebhook:WebhookSecret` (recommended): validates `X-Hub-Signature-256`
+- `GitHubActionsTracingWebhook:OtelEndpoint`: OTLP destination endpoint for exported workflow runs
+- `GitHubActionsTracingWebhook:OtelProtocol`: `grpc`, `http`, `http/protobuf`
+- `GitHubActionsTracingWebhook:OtelPath`: optional OTEL file output path
+- `GitHubActionsTracingWebhook:ChromiumPath`: optional Chromium trace path
+- `GitHubActionsTracingWebhook:SpeedscopePath`: optional Speedscope trace path
+- `GitHubActionsTracingWebhook:HtmlPath`: optional HTML trace path
+- `GitHubActionsTracingWebhook:IncludeBinlog`: `true`/`false`
+- `GitHubActionsTracingWebhook:IncludeTests`: `true`/`false`
+- `GitHubActionsTracingWebhook:MaxDegreeOfParallelism`: max number of workflow runs processed in parallel (default: `1`)
+- `GitHubActionsTracingWebhook:MinimumTestDuration`: e.g. `00:00:01`
+- `GitHubActionsTracingWebhook:MinimumBinlogDuration`: e.g. `00:00:01`
+
+For environment variables, replace `:` with `__` (double underscore), for example:
+
+- `GitHubActionsTracingWebhook__WebhookSecret`
+- `GitHubActionsTracingWebhook__OtelEndpoint`
+
+OpenTelemetry exporter environment variables with the `EXPORTER_` prefix (for example `EXPORTER_OTEL_EXPORTER_OTLP_ENDPOINT`, `EXPORTER_OTEL_EXPORTER_OTLP_PROTOCOL`, `EXPORTER_OTEL_SERVICE_NAME`) are still supported by the exporter pipeline.

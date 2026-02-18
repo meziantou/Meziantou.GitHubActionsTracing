@@ -4,4 +4,5 @@
   </Folder>
   <Project Path="Meziantou.GitHubActionsTracing.Tests/Meziantou.GitHubActionsTracing.Tests.csproj" />
   <Project Path="Meziantou.GitHubActionsTracing/Meziantou.GitHubActionsTracing.csproj" />
+  <Project Path="Meziantou.GitHubActionsTracing.Server/Meziantou.GitHubActionsTracing.Server.csproj" />
 </Solution>

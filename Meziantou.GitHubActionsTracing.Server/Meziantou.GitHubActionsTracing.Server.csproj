@@ -1,0 +1,7 @@
+<Project Sdk="Meziantou.NET.Sdk.Web">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Meziantou.GitHubActionsTracing\Meziantou.GitHubActionsTracing.csproj" />
+  </ItemGroup>
+
+</Project>

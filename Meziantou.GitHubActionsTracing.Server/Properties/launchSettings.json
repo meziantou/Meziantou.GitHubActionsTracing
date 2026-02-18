@@ -1,0 +1,12 @@
+{
+  "profiles": {
+    "Meziantou.GitHubActionsTracing.WebApi": {
+      "commandName": "Project",
+      "launchBrowser": true,
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      },
+      "applicationUrl": "https://localhost:53773;http://localhost:53774"
+    }
+  }
+}
