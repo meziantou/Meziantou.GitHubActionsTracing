@@ -56,7 +56,7 @@ jobs:
           dotnet run --project ./Meziantou.GitHubActionsTracing/ -- export "./run-info" `
             --chromium-path "./artifacts/trace-${{ steps.run.outputs.id }}.json" `
             --speedscope-path "./artifacts/trace-${{ steps.run.outputs.id }}.speedscope.json" `
-            --otel-path "./artifacts/trace-${{ steps.run.outputs.id }}.otel.json"
+            --otel-file-path "./artifacts/trace-${{ steps.run.outputs.id }}.otel.json"
 
       - name: Upload trace artifact
         uses: actions/upload-artifact@v6
