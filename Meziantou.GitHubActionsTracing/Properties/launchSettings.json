@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "Meziantou.GitHubActionsTracing": {
+      "commandName": "Project",
+      "commandLineArgs": "export https://github.com/meziantou/Meziantou.Analyzer/actions/runs/22153693656 --html-path job.html"
+    }
+  }
+}

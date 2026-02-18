@@ -1,4 +1,5 @@
 using System.IO.Compression;
+using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Diagnostics;
@@ -45,10 +46,18 @@ public static class GitHubRunDownloader
         foreach (var job in jobs)
         {
             AppLog.Info($"Downloading logs for job {job.Id} ({job.Name})");
-            var content = await GetBytesAsync(GitHubHttpClient, runIdentifier.GetApiPath($"/actions/jobs/{job.Id}/logs"), cancellationToken);
-            var logText = DecodeLogContent(content);
-            await File.WriteAllTextAsync(logsDirectory / $"{job.Id}.log", logText, cancellationToken);
             await WriteJsonAsync(metadataDirectory / $"job-{job.Id}.json", job, cancellationToken);
+
+            try
+            {
+                var content = await GetBytesAsync(GitHubHttpClient, runIdentifier.GetApiPath($"/actions/jobs/{job.Id}/logs"), cancellationToken);
+                var logText = DecodeLogContent(content);
+                await File.WriteAllTextAsync(logsDirectory / $"{job.Id}.log", logText, cancellationToken);
+            }
+            catch (HttpRequestException ex) when (ex.StatusCode is HttpStatusCode.NotFound)
+            {
+                AppLog.Warning($"Unable to download logs for job {job.Id} ({job.Name}): {ex.Message}");
+            }
         }
 
         await DownloadArtifactsAsync(GitHubHttpClient, runIdentifier, artifactsDirectory, artifacts, cancellationToken);
@@ -185,7 +194,10 @@ public static class GitHubRunDownloader
         if (!response.IsSuccessStatusCode)
         {
             var body = await response.Content.ReadAsStringAsync(cancellationToken);
-            throw new InvalidOperationException($"GitHub API call failed ({response.StatusCode}) for '{relativeOrAbsoluteUrl}': {Trim(body, 500)}");
+            throw new HttpRequestException(
+                message: $"GitHub API call failed ({response.StatusCode}) for '{relativeOrAbsoluteUrl}': {Trim(body, 500)}",
+                inner: null,
+                statusCode: response.StatusCode);
         }
 
         await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
@@ -199,7 +211,10 @@ public static class GitHubRunDownloader
         if (!response.IsSuccessStatusCode)
         {
             var body = await response.Content.ReadAsStringAsync(cancellationToken);
-            throw new InvalidOperationException($"GitHub API call failed ({response.StatusCode}) for '{relativeOrAbsoluteUrl}': {Trim(body, 500)}");
+            throw new HttpRequestException(
+                message: $"GitHub API call failed ({response.StatusCode}) for '{relativeOrAbsoluteUrl}': {Trim(body, 500)}",
+                inner: null,
+                statusCode: response.StatusCode);
         }
 
         return await response.Content.ReadAsByteArrayAsync(cancellationToken);
