@@ -84,6 +84,17 @@ internal sealed class HtmlTraceExporter : ITraceExporter
         html.AppendLine("    <div id=\"container\">");
         html.AppendLine("        <canvas id=\"canvas\"></canvas>");
         html.AppendLine("    </div>");
+        html.AppendLine("    <aside id=\"details-panel\" class=\"details-panel hidden\" aria-live=\"polite\">");
+        html.AppendLine("        <div id=\"details-panel-resizer\" class=\"details-panel-resizer\" title=\"Resize details panel\"></div>");
+        html.AppendLine("        <div class=\"details-panel-header\">");
+        html.AppendLine("            <div id=\"details-panel-title\" class=\"details-panel-title\">Node details</div>");
+        html.AppendLine("            <div class=\"details-panel-actions\">");
+        html.AppendLine("                <button id=\"details-panel-copy\" type=\"button\" class=\"details-panel-button\">Copy</button>");
+        html.AppendLine("                <button id=\"details-panel-close\" type=\"button\" class=\"details-panel-button details-panel-button-close\" aria-label=\"Close details panel\">✕</button>");
+        html.AppendLine("            </div>");
+        html.AppendLine("        </div>");
+        html.AppendLine("        <div id=\"details-panel-content\" class=\"details-panel-content\"></div>");
+        html.AppendLine("    </aside>");
         html.AppendLine("    <div id=\"tooltip\" class=\"tooltip\"></div>");
         html.AppendLine("    <script>");
         html.AppendLine($"        const spansData = {spansData};");
@@ -304,6 +315,91 @@ internal sealed class HtmlTraceExporter : ITraceExporter
             bottom: 0;
             overflow: hidden;
         }
+        .details-panel {
+            position: absolute;
+            top: var(--header-height);
+            right: 0;
+            bottom: 0;
+            width: 420px;
+            display: flex;
+            flex-direction: column;
+            background: #252526;
+            border-left: 1px solid #3e3e42;
+            z-index: 150;
+            min-width: 280px;
+            max-width: min(900px, calc(100vw - 120px));
+        }
+        .details-panel.hidden {
+            display: none;
+        }
+        .details-panel-resizer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 6px;
+            height: 100%;
+            cursor: col-resize;
+            background: transparent;
+        }
+        .details-panel-resizer:hover {
+            background: rgba(56, 139, 253, 0.35);
+        }
+        .details-panel-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            padding: 10px 12px;
+            border-bottom: 1px solid #3e3e42;
+        }
+        .details-panel-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: #ffffff;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .details-panel-actions {
+            display: flex;
+            gap: 6px;
+        }
+        .details-panel-button {
+            border: 1px solid #3e3e42;
+            background: #1f6feb;
+            color: #ffffff;
+            border-radius: 4px;
+            font-size: 11px;
+            padding: 3px 8px;
+            cursor: pointer;
+        }
+        .details-panel-button:hover {
+            filter: brightness(1.08);
+        }
+        .details-panel-button-close {
+            background: #3e3e42;
+            min-width: 28px;
+        }
+        .details-panel-content {
+            padding: 12px;
+            overflow: auto;
+            font-size: 12px;
+            user-select: text;
+            overflow-wrap: anywhere;
+            word-break: break-word;
+            white-space: normal;
+        }
+        .details-title {
+            font-weight: bold;
+            margin-bottom: 8px;
+            color: #ffffff;
+        }
+        .details-row {
+            margin: 4px 0;
+        }
+        .details-label {
+            color: #858585;
+        }
         #container:active {
             cursor: grabbing;
         }
@@ -350,6 +446,12 @@ internal sealed class HtmlTraceExporter : ITraceExporter
         const canvas = document.getElementById('canvas');
         const ctx = canvas.getContext('2d');
         const tooltip = document.getElementById('tooltip');
+        const detailsPanel = document.getElementById('details-panel');
+        const detailsPanelResizer = document.getElementById('details-panel-resizer');
+        const detailsPanelTitle = document.getElementById('details-panel-title');
+        const detailsPanelContent = document.getElementById('details-panel-content');
+        const detailsPanelCopyButton = document.getElementById('details-panel-copy');
+        const detailsPanelCloseButton = document.getElementById('details-panel-close');
         const searchInput = document.getElementById('search');
         const searchStatus = document.getElementById('search-status');
         const filterMsbuildTargetsInput = document.getElementById('filter-msbuild-targets');
@@ -373,6 +475,11 @@ internal sealed class HtmlTraceExporter : ITraceExporter
         let lastX = 0;
         let lastY = 0;
         let hoveredSpan = null;
+        let selectedSpan = null;
+        let draggedDistance = 0;
+        let detailsCopyText = '';
+        let detailsPanelWidth = 420;
+        let isResizingPanel = false;
         let searchTerm = '';
         let matchedSpanIds = null;
         let showMsbuildTargets = true;
@@ -658,6 +765,119 @@ internal sealed class HtmlTraceExporter : ITraceExporter
             return parts.join(', ');
         }
 
+        function escapeHtml(value) {
+            return String(value ?? '')
+                .replaceAll('&', '&amp;')
+                .replaceAll('<', '&lt;')
+                .replaceAll('>', '&gt;')
+                .replaceAll(/'/g, '&#39;');
+        }
+
+        function buildSpanDetailsText(span) {
+            const spanStartUtc = minTime + span.start;
+            const spanEndUtc = spanStartUtc + span.duration;
+            const lines = [
+                span.name,
+                `Kind: ${span.kind}`,
+                `Hierarchy: ${getSpanHierarchy(span)}`,
+                `Duration: ${formatDuration(span.duration)}`,
+                `Start time (UTC): ${formatUtcTimestamp(spanStartUtc)}`,
+                `End time (UTC): ${formatUtcTimestamp(spanEndUtc)}`,
+            ];
+
+            Object.entries(span.attributes).forEach(([key, value]) => {
+                if (value && value.trim()) {
+                    lines.push(`${key}: ${value}`);
+                }
+            });
+
+            return lines.join('\n');
+        }
+
+        async function copyTextToClipboard(text) {
+            if (!text) {
+                return false;
+            }
+
+            if (navigator.clipboard && window.isSecureContext) {
+                try {
+                    await navigator.clipboard.writeText(text);
+                    return true;
+                } catch {
+                }
+            }
+
+            const textarea = document.createElement('textarea');
+            textarea.value = text;
+            textarea.setAttribute('readonly', '');
+            textarea.style.position = 'fixed';
+            textarea.style.left = '-9999px';
+            document.body.appendChild(textarea);
+            textarea.select();
+
+            try {
+                return document.execCommand('copy');
+            } catch {
+                return false;
+            } finally {
+                document.body.removeChild(textarea);
+            }
+        }
+
+        function setDetailsPanelVisible(isVisible) {
+            if (!detailsPanel) {
+                return;
+            }
+
+            detailsPanel.classList.toggle('hidden', !isVisible);
+            if (isVisible) {
+                detailsPanel.style.width = `${detailsPanelWidth}px`;
+                container.style.right = `${detailsPanelWidth}px`;
+            } else {
+                container.style.right = '0';
+            }
+
+            resizeCanvas();
+        }
+
+        function renderDetailsPanel(span) {
+            if (!detailsPanelTitle || !detailsPanelContent) {
+                return;
+            }
+
+            const spanStartUtc = minTime + span.start;
+            const spanEndUtc = spanStartUtc + span.duration;
+            const lines = [
+                `<div class='details-title'>${escapeHtml(span.name)}</div>`,
+                `<div class='details-row'><span class='details-label'>Kind:</span> ${escapeHtml(span.kind)}</div>`,
+                `<div class='details-row'><span class='details-label'>Hierarchy:</span> ${escapeHtml(getSpanHierarchy(span))}</div>`,
+                `<div class='details-row'><span class='details-label'>Duration:</span> ${escapeHtml(formatDuration(span.duration))}</div>`,
+                `<div class='details-row'><span class='details-label'>Start time (UTC):</span> ${escapeHtml(formatUtcTimestamp(spanStartUtc))}</div>`,
+                `<div class='details-row'><span class='details-label'>End time (UTC):</span> ${escapeHtml(formatUtcTimestamp(spanEndUtc))}</div>`,
+            ];
+
+            Object.entries(span.attributes).forEach(([key, value]) => {
+                if (value && value.trim()) {
+                    lines.push(`<div class='details-row'><span class='details-label'>${escapeHtml(key)}:</span> ${escapeHtml(value)}</div>`);
+                }
+            });
+
+            detailsPanelTitle.textContent = span.name || 'Node details';
+            detailsPanelContent.innerHTML = lines.join('');
+            detailsCopyText = buildSpanDetailsText(span);
+        }
+
+        function openDetailsPanel(span) {
+            selectedSpan = span;
+            renderDetailsPanel(span);
+            setDetailsPanelVisible(true);
+        }
+
+        function closeDetailsPanel() {
+            selectedSpan = null;
+            setDetailsPanelVisible(false);
+        }
+
         function isSpanVisibleByFilters(span) {
             if (span.kind === 'msbuild.target') {
                 return showMsbuildTargets;
@@ -859,22 +1079,23 @@ internal sealed class HtmlTraceExporter : ITraceExporter
             const spanStartUtc = minTime + span.start;
             const spanEndUtc = spanStartUtc + span.duration;
             const lines = [
-                `<div class='tooltip-title'>${span.name}</div>`,
-                `<div class='tooltip-row'><span class='tooltip-label'>Kind:</span> ${span.kind}</div>`,
-                `<div class='tooltip-row'><span class='tooltip-label'>Hierarchy:</span> ${getSpanHierarchy(span)}</div>`,
-                `<div class='tooltip-row'><span class='tooltip-label'>Duration:</span> ${formatDuration(span.duration)}</div>`,
-                `<div class='tooltip-row'><span class='tooltip-label'>Start time (UTC):</span> ${formatUtcTimestamp(spanStartUtc)}</div>`,
-                `<div class='tooltip-row'><span class='tooltip-label'>End time (UTC):</span> ${formatUtcTimestamp(spanEndUtc)}</div>`,
+                `<div class='tooltip-title'>${escapeHtml(span.name)}</div>`,
+                `<div class='tooltip-row'><span class='tooltip-label'>Kind:</span> ${escapeHtml(span.kind)}</div>`,
+                `<div class='tooltip-row'><span class='tooltip-label'>Hierarchy:</span> ${escapeHtml(getSpanHierarchy(span))}</div>`,
+                `<div class='tooltip-row'><span class='tooltip-label'>Duration:</span> ${escapeHtml(formatDuration(span.duration))}</div>`,
+                `<div class='tooltip-row'><span class='tooltip-label'>Start time (UTC):</span> ${escapeHtml(formatUtcTimestamp(spanStartUtc))}</div>`,
+                `<div class='tooltip-row'><span class='tooltip-label'>End time (UTC):</span> ${escapeHtml(formatUtcTimestamp(spanEndUtc))}</div>`,
             ];
 
             Object.entries(span.attributes).forEach(([key, value]) => {
                 if (value && value.trim()) {
-                    lines.push(`<div class='tooltip-row'><span class='tooltip-label'>${key}:</span> ${value}</div>`);
+                    lines.push(`<div class='tooltip-row'><span class='tooltip-label'>${escapeHtml(key)}:</span> ${escapeHtml(value)}</div>`);
                 }
             });
 
             tooltip.innerHTML = lines.join('');
             tooltip.style.display = 'block';
+
             positionTooltip(mouseX, mouseY);
         }
 
@@ -938,6 +1159,7 @@ internal sealed class HtmlTraceExporter : ITraceExporter
             }
 
             isDragging = true;
+            draggedDistance = 0;
             lastX = e.clientX;
             lastY = e.clientY;
         });
@@ -952,6 +1174,7 @@ internal sealed class HtmlTraceExporter : ITraceExporter
                 const dy = e.clientY - lastY;
                 panX += dx;
                 panY += dy;
+                draggedDistance += Math.abs(dx) + Math.abs(dy);
                 lastX = e.clientX;
                 lastY = e.clientY;
                 clampPan();
@@ -978,12 +1201,76 @@ internal sealed class HtmlTraceExporter : ITraceExporter
 
         window.addEventListener('mouseup', () => {
             isDragging = false;
+            isResizingPanel = false;
         });
 
         canvas.addEventListener('mouseleave', () => {
             isDragging = false;
             hideTooltip();
         });
+
+        canvas.addEventListener('click', (e) => {
+            if (draggedDistance > 4) {
+                return;
+            }
+
+            const rect = canvas.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+            const span = getSpanAt(mouseX, mouseY);
+
+            if (!span || isResizingPanel) {
+                return;
+            }
+
+            hoveredSpan = span;
+            openDetailsPanel(span);
+        });
+
+        if (detailsPanelResizer) {
+            detailsPanelResizer.addEventListener('mousedown', (e) => {
+                if (!detailsPanel || detailsPanel.classList.contains('hidden')) {
+                    return;
+                }
+
+                e.preventDefault();
+                isResizingPanel = true;
+            });
+        }
+
+        window.addEventListener('mousemove', (e) => {
+            if (!isResizingPanel) {
+                return;
+            }
+
+            const minWidth = 280;
+            const maxWidth = Math.min(900, window.innerWidth - 120);
+            const desiredWidth = window.innerWidth - e.clientX;
+            detailsPanelWidth = Math.min(maxWidth, Math.max(minWidth, desiredWidth));
+
+            if (detailsPanel && !detailsPanel.classList.contains('hidden')) {
+                detailsPanel.style.width = `${detailsPanelWidth}px`;
+                container.style.right = `${detailsPanelWidth}px`;
+                resizeCanvas();
+            }
+        });
+
+        if (detailsPanelCloseButton) {
+            detailsPanelCloseButton.addEventListener('click', () => {
+                closeDetailsPanel();
+            });
+        }
+
+        if (detailsPanelCopyButton) {
+            detailsPanelCopyButton.addEventListener('click', async () => {
+                const copied = await copyTextToClipboard(detailsCopyText);
+                const originalText = detailsPanelCopyButton.textContent;
+                detailsPanelCopyButton.textContent = copied ? 'Copied' : 'Copy failed';
+                setTimeout(() => {
+                    detailsPanelCopyButton.textContent = originalText;
+                }, 1200);
+            });
+        }
 
         if (searchInput) {
             searchInput.addEventListener('input', () => {
@@ -1017,8 +1304,14 @@ internal sealed class HtmlTraceExporter : ITraceExporter
         showMsbuildTasks = !filterMsbuildTasksInput || filterMsbuildTasksInput.checked;
         showTests = !filterTestsInput || filterTestsInput.checked;
         layout = buildLayout();
+        setDetailsPanelVisible(false);
 
         window.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && selectedSpan) {
+                closeDetailsPanel();
+                return;
+            }
+
             if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f' && searchInput) {
                 e.preventDefault();
                 searchInput.focus();

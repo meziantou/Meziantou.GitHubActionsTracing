@@ -535,6 +535,13 @@ public sealed class CliApplicationTests
         Assert.Contains("tooltip-label'>Hierarchy:</span>", fileContent, StringComparison.Ordinal);
         Assert.Contains("tooltip-label'>Start time (UTC):</span>", fileContent, StringComparison.Ordinal);
         Assert.Contains("tooltip-label'>End time (UTC):</span>", fileContent, StringComparison.Ordinal);
+        Assert.Contains("id=\"details-panel\"", fileContent, StringComparison.Ordinal);
+        Assert.Contains("id=\"details-panel-resizer\"", fileContent, StringComparison.Ordinal);
+        Assert.Contains("id=\"details-panel-content\"", fileContent, StringComparison.Ordinal);
+        Assert.Contains("openDetailsPanel(span);", fileContent, StringComparison.Ordinal);
+        Assert.Contains("canvas.addEventListener('click'", fileContent, StringComparison.Ordinal);
+        Assert.Contains("navigator.clipboard.writeText", fileContent, StringComparison.Ordinal);
+        Assert.Contains("user-select: text;", fileContent, StringComparison.Ordinal);
         Assert.Contains("View run on GitHub", fileContent, StringComparison.Ordinal);
         Assert.Contains(model.WorkflowRun.HtmlUrl, fileContent, StringComparison.Ordinal);
     }
