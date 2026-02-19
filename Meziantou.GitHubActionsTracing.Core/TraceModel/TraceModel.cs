@@ -4,9 +4,12 @@ using System.Xml.Linq;
 using Meziantou.Framework;
 using Microsoft.Build.Logging;
 using Microsoft.Build.Logging.StructuredLogger;
+using StructuredItem = Microsoft.Build.Logging.StructuredLogger.Item;
 using StructuredProperty = Microsoft.Build.Logging.StructuredLogger.Property;
 using StructuredProject = Microsoft.Build.Logging.StructuredLogger.Project;
 using StructuredTarget = Microsoft.Build.Logging.StructuredLogger.Target;
+using StructuredTaskParameterItem = Microsoft.Build.Logging.StructuredLogger.TaskParameterItem;
+using StructuredTaskParameterProperty = Microsoft.Build.Logging.StructuredLogger.TaskParameterProperty;
 using StructuredTask = Microsoft.Build.Logging.StructuredLogger.Task;
 
 namespace Meziantou.GitHubActionsTracing;
@@ -522,8 +525,8 @@ internal sealed partial class TraceModel
                         ["artifact.id"] = artifact.Artifact.Id,
                         ["artifact.name"] = artifact.Artifact.Name,
                         ["binlog.file"] = file.Value,
-                            ["project.file"] = project?.ProjectFile,
-                            ["project.target_framework"] = project?.TargetFramework,
+                        ["project.file"] = project?.ProjectFile,
+                        ["project.target_framework"] = project?.TargetFramework,
                         ["target.succeeded"] = target.Succeeded,
                     });
 
@@ -547,6 +550,18 @@ internal sealed partial class TraceModel
 
                     var taskName = BuildMsBuildNodeName(task.Name ?? "Task", project);
 
+                    var taskAttributes = new Dictionary<string, object?>(StringComparer.Ordinal)
+                    {
+                        ["artifact.id"] = artifact.Artifact.Id,
+                        ["artifact.name"] = artifact.Artifact.Name,
+                        ["binlog.file"] = file.Value,
+                        ["project.file"] = project?.ProjectFile,
+                        ["project.target_framework"] = project?.TargetFramework,
+                        ["task.from_assembly"] = task.FromAssembly,
+                    };
+
+                    AddTaskParametersAsAttributes(task, taskAttributes);
+
                     AddSpan(
                         name: taskName,
                         kind: "msbuild.task",
@@ -554,18 +569,52 @@ internal sealed partial class TraceModel
                         endTime: taskEnd,
                         parentId: targetSpan.Id,
                         jobId: jobId,
-                        attributes: new Dictionary<string, object?>(StringComparer.Ordinal)
-                        {
-                            ["artifact.id"] = artifact.Artifact.Id,
-                            ["artifact.name"] = artifact.Artifact.Name,
-                            ["binlog.file"] = file.Value,
-                            ["project.file"] = project?.ProjectFile,
-                            ["project.target_framework"] = project?.TargetFramework,
-                            ["task.from_assembly"] = task.FromAssembly,
-                        });
+                        attributes: taskAttributes);
                 }
             }
         }
+    }
+
+    private static void AddTaskParametersAsAttributes(StructuredTask task, Dictionary<string, object?> attributes)
+    {
+        var taskParameters = new Dictionary<string, SortedSet<string>>(StringComparer.Ordinal);
+
+        AddTaskParameterValue(taskParameters, "CommandLineArguments", task.CommandLineArguments);
+
+        foreach (var parameter in EnumerateNodes<StructuredTaskParameterProperty>(task))
+        {
+            AddTaskParameterValue(taskParameters, parameter.ParameterName, parameter.Value);
+        }
+
+        foreach (var parameter in EnumerateNodes<StructuredTaskParameterItem>(task))
+        {
+            foreach (var item in EnumerateNodes<StructuredItem>(parameter))
+            {
+                AddTaskParameterValue(taskParameters, parameter.ParameterName, item.Text);
+            }
+        }
+
+        foreach (var taskParameter in taskParameters)
+        {
+            attributes[$"task.parameter.{taskParameter.Key}"] = string.Join(';', taskParameter.Value);
+        }
+    }
+
+    private static void AddTaskParameterValue(Dictionary<string, SortedSet<string>> taskParameters, string? parameterName, string? parameterValue)
+    {
+        if (string.IsNullOrWhiteSpace(parameterName))
+            return;
+
+        if (string.IsNullOrWhiteSpace(parameterValue))
+            return;
+
+        if (!taskParameters.TryGetValue(parameterName, out var values))
+        {
+            values = new SortedSet<string>(StringComparer.Ordinal);
+            taskParameters.Add(parameterName, values);
+        }
+
+        values.Add(parameterValue);
     }
 
     private static StructuredProject? GetProjectNode(StructuredTarget target)

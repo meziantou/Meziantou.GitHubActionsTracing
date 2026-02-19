@@ -49,6 +49,7 @@ internal sealed class HtmlTraceExporter : ITraceExporter
 
         var spansData = BuildSpansData(spans, minTime, jobs);
         var jobsData = BuildJobsData(jobs);
+        var workflowRunUrl = model.WorkflowRun.HtmlUrl;
 
         var html = new StringBuilder();
         html.AppendLine("<!DOCTYPE html>");
@@ -65,6 +66,11 @@ internal sealed class HtmlTraceExporter : ITraceExporter
         html.AppendLine("    <div id=\"header\" class=\"header\">");
         html.AppendLine($"        <h1>{HtmlEncode(model.WorkflowRun.Name ?? "Workflow Run")}</h1>");
         html.AppendLine(CultureInfo.InvariantCulture, $"        <div class=\"info\">Duration: {FormatDuration((maxTime - minTime).TotalMilliseconds)} | Idle: {idleDurationSeconds:F1}s ({idlePercentage:P1}) | Spans: {spans.Count} | Jobs: {jobs.Count}</div>");
+        if (!string.IsNullOrWhiteSpace(workflowRunUrl))
+        {
+            html.AppendLine($"        <div class=\"info\"><a class=\"run-link\" href=\"{HtmlEncode(workflowRunUrl)}\" target=\"_blank\" rel=\"noopener noreferrer\">View run on GitHub ↗</a></div>");
+        }
+
         html.AppendLine("        <div class=\"header-controls\">");
         html.AppendLine("            <label for=\"search\">Search:</label>");
         html.AppendLine("            <input id=\"search\" class=\"search-input\" type=\"text\" placeholder=\"Span name contains...\" autocomplete=\"off\" />");
@@ -241,6 +247,13 @@ internal sealed class HtmlTraceExporter : ITraceExporter
             color: #858585;
             font-size: 14px;
         }
+        .run-link {
+            color: #58a6ff;
+            text-decoration: none;
+        }
+        .run-link:hover {
+            text-decoration: underline;
+        }
         .header-controls {
             margin-top: 12px;
             display: flex;
@@ -290,7 +303,6 @@ internal sealed class HtmlTraceExporter : ITraceExporter
             right: 0;
             bottom: 0;
             overflow: hidden;
-            cursor: grab;
         }
         #container:active {
             cursor: grabbing;

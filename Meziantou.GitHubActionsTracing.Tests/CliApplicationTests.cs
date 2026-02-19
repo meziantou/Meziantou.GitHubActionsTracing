@@ -260,7 +260,7 @@ public sealed class CliApplicationTests
             .Where(span => string.Equals(GetAttributeValue(span, "span.kind"), "test", StringComparison.Ordinal))
             .ToList();
 
-        Assert.All(testSpans, static span =>
+        Assert.All(testSpans, span =>
         {
             var spanName = span.GetProperty("name").GetString();
             Assert.True(spanName is not null && spanName.StartsWith("Test: ", StringComparison.Ordinal), $"Unexpected test span name '{spanName}'");
@@ -287,13 +287,13 @@ public sealed class CliApplicationTests
         }
 
         var spansById = spans
-            .Select(static span => new
+            .Select(span => new
             {
                 Span = span,
                 SpanId = span.GetProperty("spanId").GetString(),
             })
-            .Where(static item => !string.IsNullOrEmpty(item.SpanId))
-            .ToDictionary(static item => item.SpanId!, static item => item.Span, StringComparer.Ordinal);
+            .Where(item => !string.IsNullOrEmpty(item.SpanId))
+            .ToDictionary(item => item.SpanId!, item => item.Span, StringComparer.Ordinal);
 
         var targetSpans = spans
             .Where(span => string.Equals(GetAttributeValue(span, "span.kind"), "msbuild.target", StringComparison.Ordinal))
@@ -424,14 +424,14 @@ public sealed class CliApplicationTests
             .OfType<string>()
             .ToHashSet(StringComparer.Ordinal);
 
-        foreach (var kind in model.Spans.Select(static span => span.Kind).Distinct(StringComparer.Ordinal))
+        foreach (var kind in model.Spans.Select(span => span.Kind).Distinct(StringComparer.Ordinal))
         {
             Assert.True(exportedKinds.Contains(kind), $"Missing Chromium event category '{kind}'");
         }
 
-        Assert.Contains(completeEvents, static evt => GetJsonInt32(evt, "tid", "threadId") is 1);
+        Assert.Contains(completeEvents, evt => GetJsonInt32(evt, "tid", "threadId") is 1);
 
-        Assert.Contains(completeEvents, static evt =>
+        Assert.Contains(completeEvents, evt =>
             GetJsonString(evt, "cat", "category") is "job" &&
             evt.TryGetProperty("args", out var args) &&
             args.TryGetProperty("kind", out var kind) &&
@@ -459,10 +459,10 @@ public sealed class CliApplicationTests
 
         var frames = root.GetProperty("shared").GetProperty("frames").EnumerateArray().ToList();
         Assert.NotEmpty(frames);
-        Assert.All(frames, static frame => Assert.False(string.IsNullOrWhiteSpace(frame.GetProperty("name").GetString())));
+        Assert.All(frames, frame => Assert.False(string.IsNullOrWhiteSpace(frame.GetProperty("name").GetString())));
 
         var profiles = root.GetProperty("profiles").EnumerateArray().ToList();
-        var expectedProfileCount = model.Spans.Count(static span => span.Kind is "job");
+        var expectedProfileCount = model.Spans.Count(span => span.Kind is "job");
         Assert.Equal(expectedProfileCount, profiles.Count);
 
         foreach (var profile in profiles)
@@ -535,6 +535,8 @@ public sealed class CliApplicationTests
         Assert.Contains("tooltip-label'>Hierarchy:</span>", fileContent, StringComparison.Ordinal);
         Assert.Contains("tooltip-label'>Start time (UTC):</span>", fileContent, StringComparison.Ordinal);
         Assert.Contains("tooltip-label'>End time (UTC):</span>", fileContent, StringComparison.Ordinal);
+        Assert.Contains("View run on GitHub", fileContent, StringComparison.Ordinal);
+        Assert.Contains(model.WorkflowRun.HtmlUrl, fileContent, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -543,33 +545,70 @@ public sealed class CliApplicationTests
         await using var temporaryDirectory = TemporaryDirectory.Create();
         var model = LoadEmbeddedFixtureModel(temporaryDirectory);
 
-        Assert.DoesNotContain(model.Spans, static span =>
+        Assert.DoesNotContain(model.Spans, span =>
             span.Kind is "msbuild.target" or "msbuild.task"
             && string.Equals(span.Name, "CallTarget", StringComparison.OrdinalIgnoreCase));
 
-        Assert.DoesNotContain(model.Spans, static span =>
+        Assert.DoesNotContain(model.Spans, span =>
             span.Kind is "msbuild.target" or "msbuild.task"
             && string.Equals(span.Name, "Csc", StringComparison.OrdinalIgnoreCase));
 
-        Assert.DoesNotContain(model.Spans, static span =>
+        Assert.DoesNotContain(model.Spans, span =>
             span.Kind is "msbuild.target" or "msbuild.task"
             && string.Equals(span.Name, "Restore", StringComparison.OrdinalIgnoreCase));
 
-        Assert.DoesNotContain(model.Spans, static span =>
+        Assert.DoesNotContain(model.Spans, span =>
             span.Kind is "msbuild.task"
             && string.Equals(span.Name, "RestoreTask", StringComparison.OrdinalIgnoreCase));
 
-        Assert.Contains(model.Spans, static span =>
+        Assert.Contains(model.Spans, span =>
             span.Kind is "msbuild.target" or "msbuild.task"
             && span.Name.StartsWith("Csc (", StringComparison.Ordinal));
 
-        Assert.Contains(model.Spans, static span =>
+        Assert.Contains(model.Spans, span =>
             span.Kind is "msbuild.target" or "msbuild.task"
             && span.Name.StartsWith("Restore (", StringComparison.Ordinal));
 
-        Assert.Contains(model.Spans, static span =>
+        Assert.Contains(model.Spans, span =>
             span.Kind is "msbuild.task"
             && span.Name.StartsWith("RestoreTask (", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task EmbeddedFixture_BinlogTaskParameters_AreAddedToTaskSpans()
+    {
+        await using var temporaryDirectory = TemporaryDirectory.Create();
+        var model = LoadEmbeddedFixtureModel(temporaryDirectory);
+
+        var taskSpans = model.Spans
+            .Where(span => span.Kind is "msbuild.task")
+            .ToList();
+
+        Assert.NotEmpty(taskSpans);
+
+        Assert.Contains(taskSpans, span =>
+            span.Attributes.Any(kvp =>
+                kvp.Key.StartsWith("task.parameter.", StringComparison.Ordinal)
+                && kvp.Value is string parameterValue
+                && !string.IsNullOrWhiteSpace(parameterValue)));
+    }
+
+    [Fact]
+    public async Task EmbeddedFixture_CscTask_HasCommandLineArgumentsAsTaskParameter()
+    {
+        await using var temporaryDirectory = TemporaryDirectory.Create();
+        var model = LoadEmbeddedFixtureModel(temporaryDirectory);
+
+        var cscTaskSpans = model.Spans
+            .Where(span => span.Kind is "msbuild.task" && span.Name.StartsWith("Csc (", StringComparison.Ordinal))
+            .ToList();
+
+        Assert.NotEmpty(cscTaskSpans);
+
+        Assert.Contains(cscTaskSpans, span =>
+            span.Attributes.TryGetValue("task.parameter.CommandLineArguments", out var value)
+            && value is string commandLineArguments
+            && !string.IsNullOrWhiteSpace(commandLineArguments));
     }
 
     [Fact]
@@ -581,13 +620,13 @@ public sealed class CliApplicationTests
 
         var model = TraceModel.Load(fixtureDirectory);
 
-        var job = model.Spans.Single(static span => span.Kind is "job");
+        var job = model.Spans.Single(span => span.Kind is "job");
         var steps = model.Spans
-            .Where(static span => span.Kind is "step")
-            .OrderBy(static span => span.Attributes.TryGetValue("step.number", out var value) && value is int stepNumber ? stepNumber : int.MaxValue)
+            .Where(span => span.Kind is "step")
+            .OrderBy(span => span.Attributes.TryGetValue("step.number", out var value) && value is int stepNumber ? stepNumber : int.MaxValue)
             .ToList();
         var groups = model.Spans
-            .Where(static span => span.Kind is "log.group")
+            .Where(span => span.Kind is "log.group")
             .ToList();
 
         Assert.Equal(2, steps.Count);
@@ -595,8 +634,8 @@ public sealed class CliApplicationTests
 
         var firstStep = steps[0];
         var secondStep = steps[1];
-        var firstGroup = groups.Single(static span => span.Name == "Precise log group");
-        var secondGroup = groups.Single(static span => span.Name == "Group currently mapped to next step");
+        var firstGroup = groups.Single(span => span.Name == "Precise log group");
+        var secondGroup = groups.Single(span => span.Name == "Group currently mapped to next step");
 
         Assert.Equal(firstStep.Id, firstGroup.ParentId);
         Assert.Equal(firstGroup.EndTime, firstStep.EndTime);
@@ -619,7 +658,7 @@ public sealed class CliApplicationTests
             MinimumTestDuration = TimeSpan.Zero,
         });
 
-        var testSpan = model.Spans.Single(static span => span.Kind is "test");
+        var testSpan = model.Spans.Single(span => span.Kind is "test");
         Assert.Equal(1001, testSpan.JobId);
     }
 
@@ -632,40 +671,40 @@ public sealed class CliApplicationTests
 
         var model = TraceModel.Load(fixtureDirectory);
 
-        var stepSpan = model.Spans.Single(static span => span.Kind is "step");
+        var stepSpan = model.Spans.Single(span => span.Kind is "step");
         var events = stepSpan.Events;
 
         Assert.Equal(6, events.Count);
 
-        Assert.Contains(events, static traceEvent =>
+        Assert.Contains(events, traceEvent =>
             traceEvent.Name is "warning"
             && traceEvent.Message is "warning from workflow command");
 
-        Assert.Contains(events, static traceEvent =>
+        Assert.Contains(events, traceEvent =>
             traceEvent.Name is "error"
             && traceEvent.Message is "error from workflow command");
 
-        Assert.Contains(events, static traceEvent =>
+        Assert.Contains(events, traceEvent =>
             traceEvent.Name is "warning"
             && traceEvent.Message is "warning from legacy syntax");
 
-        Assert.Contains(events, static traceEvent =>
+        Assert.Contains(events, traceEvent =>
             traceEvent.Name is "error"
             && traceEvent.Message is "error from legacy syntax");
 
-        Assert.Contains(events, static traceEvent =>
+        Assert.Contains(events, traceEvent =>
             traceEvent.Name is "warning"
             && traceEvent.Message is "warning from ansi orange"
             && traceEvent.Attributes.TryGetValue("annotation.source", out var source)
             && source is "ansi");
 
-        Assert.Contains(events, static traceEvent =>
+        Assert.Contains(events, traceEvent =>
             traceEvent.Name is "error"
             && traceEvent.Message is "error from ansi red"
             && traceEvent.Attributes.TryGetValue("annotation.source", out var source)
             && source is "ansi");
 
-        Assert.DoesNotContain(events, static traceEvent =>
+        Assert.DoesNotContain(events, traceEvent =>
             traceEvent.Message.Contains("cyan informational output", StringComparison.Ordinal));
     }
 
