@@ -535,6 +535,10 @@ public sealed class CliApplicationTests
         Assert.Contains("function positionTooltip(mouseX, mouseY)", fileContent, StringComparison.Ordinal);
         Assert.Contains("positionTooltip(e.clientX, e.clientY);", fileContent, StringComparison.Ordinal);
         Assert.Contains("const spansById = new Map();", fileContent, StringComparison.Ordinal);
+        Assert.Contains("function updateSelectedSpanHierarchy()", fileContent, StringComparison.Ordinal);
+        Assert.Contains("function getSelectedSpanRelation(span)", fileContent, StringComparison.Ordinal);
+        Assert.Contains("relation === 'ancestor'", fileContent, StringComparison.Ordinal);
+        Assert.Contains("relation === 'descendant'", fileContent, StringComparison.Ordinal);
         Assert.Contains("function getSpanHierarchy(span)", fileContent, StringComparison.Ordinal);
         Assert.Contains("function formatUtcTimestamp(epochMilliseconds)", fileContent, StringComparison.Ordinal);
         Assert.Contains("tooltip-label'>Hierarchy:</span>", fileContent, StringComparison.Ordinal);

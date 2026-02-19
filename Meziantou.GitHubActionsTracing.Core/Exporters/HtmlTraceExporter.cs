@@ -524,6 +524,8 @@ internal sealed class HtmlTraceExporter : ITraceExporter
         let lastY = 0;
         let hoveredSpan = null;
         let selectedSpan = null;
+        let selectedAncestorIds = null;
+        let selectedDescendantIds = null;
         let draggedDistance = 0;
         let detailsCopyText = '';
         let detailsPanelWidth = 420;
@@ -551,6 +553,89 @@ internal sealed class HtmlTraceExporter : ITraceExporter
         spansData.forEach(span => {
             spansById.set(span.id, span);
         });
+
+        const spansByParentId = new Map();
+        spansData.forEach(span => {
+            if (span.parentId === null || span.parentId === undefined || span.parentId === 0) {
+                return;
+            }
+
+            if (!spansByParentId.has(span.parentId)) {
+                spansByParentId.set(span.parentId, []);
+            }
+
+            spansByParentId.get(span.parentId).push(span.id);
+        });
+
+        function updateSelectedSpanHierarchy() {
+            if (!selectedSpan) {
+                selectedAncestorIds = null;
+                selectedDescendantIds = null;
+                return;
+            }
+
+            const ancestorIds = new Set();
+            const visitedAncestorIds = new Set([selectedSpan.id]);
+            let current = selectedSpan;
+            while (current) {
+                if (current.parentId === null || current.parentId === undefined || current.parentId === 0) {
+                    break;
+                }
+
+                const parentSpan = spansById.get(current.parentId);
+                if (!parentSpan || visitedAncestorIds.has(parentSpan.id)) {
+                    break;
+                }
+
+                ancestorIds.add(parentSpan.id);
+                visitedAncestorIds.add(parentSpan.id);
+                current = parentSpan;
+            }
+
+            const descendantIds = new Set();
+            const visitedDescendantIds = new Set([selectedSpan.id]);
+            const stack = [selectedSpan.id];
+            while (stack.length > 0) {
+                const parentId = stack.pop();
+                const childIds = spansByParentId.get(parentId);
+                if (!childIds || childIds.length === 0) {
+                    continue;
+                }
+
+                childIds.forEach(childId => {
+                    if (visitedDescendantIds.has(childId)) {
+                        return;
+                    }
+
+                    visitedDescendantIds.add(childId);
+                    descendantIds.add(childId);
+                    stack.push(childId);
+                });
+            }
+
+            selectedAncestorIds = ancestorIds;
+            selectedDescendantIds = descendantIds;
+        }
+
+        function getSelectedSpanRelation(span) {
+            if (!selectedSpan) {
+                return null;
+            }
+
+            if (span.id === selectedSpan.id) {
+                return 'selected';
+            }
+
+            if (selectedAncestorIds && selectedAncestorIds.has(span.id)) {
+                return 'ancestor';
+            }
+
+            if (selectedDescendantIds && selectedDescendantIds.has(span.id)) {
+                return 'descendant';
+            }
+
+            return null;
+        }
 
         function buildLayout() {
             const spanRows = new Map();
@@ -920,12 +1005,14 @@ internal sealed class HtmlTraceExporter : ITraceExporter
 
         function openDetailsPanel(span) {
             selectedSpan = span;
+            updateSelectedSpanHierarchy();
             renderDetailsPanel(span);
             setDetailsPanelVisible(true);
         }
 
         function closeDetailsPanel() {
             selectedSpan = null;
+            updateSelectedSpanHierarchy();
             setDetailsPanelVisible(false);
         }
 
@@ -1132,14 +1219,19 @@ internal sealed class HtmlTraceExporter : ITraceExporter
             }
 
             const hasSearch = searchTerm.length > 0;
+            const hasSelectedSpan = selectedSpan !== null;
             visibleSpans.forEach(({ span, x, y, width, height }) => {
                 const isMatch = isSearchMatch(span);
                 const variant = layout.spanVariants.get(span.id) ?? 0;
-                if (hasSearch && !isMatch) {
-                    ctx.globalAlpha = 0.18;
+                const relation = getSelectedSpanRelation(span);
+                const isInSelectedHierarchy = relation !== null;
+                const shouldDimForSearch = hasSearch && !isMatch && !isInSelectedHierarchy;
+                const shouldDimForSelection = hasSelectedSpan && !isInSelectedHierarchy;
+                if (shouldDimForSearch) {
+                    ctx.globalAlpha = shouldDimForSelection ? 0.08 : 0.18;
                     ctx.fillStyle = '#5a5a5a';
                 } else {
-                    ctx.globalAlpha = 1;
+                    ctx.globalAlpha = shouldDimForSelection ? 0.12 : 1;
                     ctx.fillStyle = getSpanColor(span, variant);
                 }
 
@@ -1152,9 +1244,23 @@ internal sealed class HtmlTraceExporter : ITraceExporter
                     ctx.strokeRect(x + 0.5, y + 0.5, Math.max(1, width - 1), Math.max(1, height - 1));
                 }
 
+                if (relation === 'selected') {
+                    ctx.strokeStyle = '#ffffff';
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(x + 1, y + 1, Math.max(1, width - 2), Math.max(1, height - 2));
+                } else if (relation === 'ancestor') {
+                    ctx.strokeStyle = '#f2cc60';
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(x + 1, y + 1, Math.max(1, width - 2), Math.max(1, height - 2));
+                } else if (relation === 'descendant') {
+                    ctx.strokeStyle = '#4fc1ff';
+                    ctx.lineWidth = 1.5;
+                    ctx.strokeRect(x + 1, y + 1, Math.max(1, width - 2), Math.max(1, height - 2));
+                }
+
                 if (width > 50) {
-                    ctx.fillStyle = hasSearch && !isMatch ? '#d4d4d4' : '#ffffff';
-                    ctx.globalAlpha = hasSearch && !isMatch ? 0.85 : 1;
+                    ctx.fillStyle = shouldDimForSearch || shouldDimForSelection ? '#d4d4d4' : '#ffffff';
+                    ctx.globalAlpha = shouldDimForSearch || shouldDimForSelection ? 0.85 : 1;
                     ctx.font = '11px sans-serif';
                     ctx.textAlign = 'left';
                     ctx.textBaseline = 'middle';
