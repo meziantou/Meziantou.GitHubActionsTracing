@@ -521,10 +521,15 @@ public sealed class CliApplicationTests
         Assert.Contains("Show MSBuild Targets", fileContent, StringComparison.Ordinal);
         Assert.Contains("Show MSBuild Tasks", fileContent, StringComparison.Ordinal);
         Assert.Contains("Show Tests", fileContent, StringComparison.Ordinal);
+        Assert.Contains("Duration (ms):", fileContent, StringComparison.Ordinal);
+        Assert.Contains("id=\"filter-duration-min\" class=\"duration-number-input\" type=\"number\"", fileContent, StringComparison.Ordinal);
+        Assert.Contains("id=\"filter-duration-max\" class=\"duration-number-input\" type=\"number\"", fileContent, StringComparison.Ordinal);
         Assert.Contains("function isSpanVisibleByFilters(span)", fileContent, StringComparison.Ordinal);
         Assert.Contains("span.kind === 'msbuild.target'", fileContent, StringComparison.Ordinal);
         Assert.Contains("span.kind === 'msbuild.task'", fileContent, StringComparison.Ordinal);
         Assert.Contains("span.kind === 'test'", fileContent, StringComparison.Ordinal);
+        Assert.Contains("function updateDurationFilter(changedInput)", fileContent, StringComparison.Ordinal);
+        Assert.Contains("span.duration < minDurationMs || span.duration > maxDurationMs", fileContent, StringComparison.Ordinal);
         Assert.Contains("max-height: calc(100vh - 16px);", fileContent, StringComparison.Ordinal);
         Assert.Contains("overflow-wrap: anywhere;", fileContent, StringComparison.Ordinal);
         Assert.Contains("function positionTooltip(mouseX, mouseY)", fileContent, StringComparison.Ordinal);
@@ -543,7 +548,9 @@ public sealed class CliApplicationTests
         Assert.Contains("navigator.clipboard.writeText", fileContent, StringComparison.Ordinal);
         Assert.Contains("user-select: text;", fileContent, StringComparison.Ordinal);
         Assert.Contains("View run on GitHub", fileContent, StringComparison.Ordinal);
-        Assert.Contains(model.WorkflowRun.HtmlUrl, fileContent, StringComparison.Ordinal);
+        var workflowRunHtmlUrl = model.WorkflowRun.HtmlUrl;
+        Assert.NotNull(workflowRunHtmlUrl);
+        Assert.Contains(workflowRunHtmlUrl, fileContent, StringComparison.Ordinal);
     }
 
     [Fact]

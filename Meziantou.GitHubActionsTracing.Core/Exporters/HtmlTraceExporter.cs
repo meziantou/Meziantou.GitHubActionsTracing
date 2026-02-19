@@ -76,6 +76,14 @@ internal sealed class HtmlTraceExporter : ITraceExporter
         html.AppendLine("            <input id=\"search\" class=\"search-input\" type=\"text\" placeholder=\"Span name contains...\" autocomplete=\"off\" />");
         html.AppendLine("            <span id=\"search-status\" class=\"search-status\"></span>");
         html.AppendLine("            <span class=\"filters-separator\" aria-hidden=\"true\">|</span>");
+        html.AppendLine("            <label for=\"filter-duration-min\">Duration (ms):</label>");
+        html.AppendLine("            <div class=\"duration-filter\">");
+        html.AppendLine("                <label class=\"duration-number-label\" for=\"filter-duration-min\">Min</label>");
+        html.AppendLine("                <input id=\"filter-duration-min\" class=\"duration-number-input\" type=\"number\" min=\"0\" value=\"0\" step=\"1\" />");
+        html.AppendLine("                <label class=\"duration-number-label\" for=\"filter-duration-max\">Max</label>");
+        html.AppendLine("                <input id=\"filter-duration-max\" class=\"duration-number-input\" type=\"number\" min=\"0\" value=\"100\" step=\"1\" />");
+        html.AppendLine("            </div>");
+        html.AppendLine("            <span class=\"filters-separator\" aria-hidden=\"true\">|</span>");
         html.AppendLine("            <label class=\"filter-option\" for=\"filter-msbuild-targets\"><input id=\"filter-msbuild-targets\" type=\"checkbox\" checked /> Show MSBuild Targets</label>");
         html.AppendLine("            <label class=\"filter-option\" for=\"filter-msbuild-tasks\"><input id=\"filter-msbuild-tasks\" type=\"checkbox\" checked /> Show MSBuild Tasks</label>");
         html.AppendLine("            <label class=\"filter-option\" for=\"filter-tests\"><input id=\"filter-tests\" type=\"checkbox\" checked /> Show Tests</label>");
@@ -307,6 +315,44 @@ internal sealed class HtmlTraceExporter : ITraceExporter
             accent-color: #3794ff;
             cursor: pointer;
         }
+        .duration-filter {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            min-width: 250px;
+        }
+        .duration-number-label {
+            color: #9cdcfe;
+            font-size: 12px;
+            white-space: nowrap;
+        }
+        .duration-number-input {
+            width: 88px;
+            padding: 5px 8px;
+            border-radius: 4px;
+            border: 1px solid #3e3e42;
+            background: #1e1e1e;
+            color: #d4d4d4;
+            outline: none;
+            font-variant-numeric: tabular-nums;
+        }
+        .duration-number-input:focus {
+            border-color: #3794ff;
+            box-shadow: 0 0 0 1px #3794ff;
+        }
+        .duration-number-input::-webkit-outer-spin-button,
+        .duration-number-input::-webkit-inner-spin-button {
+            opacity: 1;
+        }
+        .duration-number-input::placeholder {
+            color: #8b949e;
+        }
+        .duration-filter .duration-number-label:first-child {
+            margin-left: 2px;
+        }
+        .duration-filter .duration-number-label {
+            white-space: nowrap;
+        }
         #container {
             position: absolute;
             top: var(--header-height);
@@ -457,6 +503,8 @@ internal sealed class HtmlTraceExporter : ITraceExporter
         const filterMsbuildTargetsInput = document.getElementById('filter-msbuild-targets');
         const filterMsbuildTasksInput = document.getElementById('filter-msbuild-tasks');
         const filterTestsInput = document.getElementById('filter-tests');
+        const filterDurationMinInput = document.getElementById('filter-duration-min');
+        const filterDurationMaxInput = document.getElementById('filter-duration-max');
 
         const ROW_HEIGHT = 16;
         const ROW_PADDING = 2;
@@ -485,6 +533,9 @@ internal sealed class HtmlTraceExporter : ITraceExporter
         let showMsbuildTargets = true;
         let showMsbuildTasks = true;
         let showTests = true;
+        let minDurationMs = 0;
+        let maxDurationMs = Number.POSITIVE_INFINITY;
+        let durationFilterCeiling = 100;
 
         const kindColors = {
             'workflow': '#3794ff',
@@ -879,25 +930,103 @@ internal sealed class HtmlTraceExporter : ITraceExporter
         }
 
         function isSpanVisibleByFilters(span) {
+            let isVisibleByKind = true;
+
             if (span.kind === 'msbuild.target') {
-                return showMsbuildTargets;
+                isVisibleByKind = showMsbuildTargets;
             }
 
             if (span.kind === 'msbuild.task') {
-                return showMsbuildTasks;
+                isVisibleByKind = showMsbuildTasks;
             }
 
             if (span.kind === 'test') {
-                return showTests;
+                isVisibleByKind = showTests;
+            }
+
+            if (!isVisibleByKind) {
+                return false;
+            }
+
+            if (span.duration < minDurationMs || span.duration > maxDurationMs) {
+                return false;
             }
 
             return true;
         }
 
-        function updateFilters() {
+        function initializeDurationFilter() {
+            durationFilterCeiling = Math.max(
+                1,
+                Math.ceil(spansData.reduce((currentMax, span) => Math.max(currentMax, span.duration || 0), 0))
+            );
+
+            if (!filterDurationMinInput || !filterDurationMaxInput) {
+                minDurationMs = 0;
+                maxDurationMs = durationFilterCeiling;
+                return;
+            }
+
+            filterDurationMinInput.min = '0';
+            filterDurationMinInput.max = String(durationFilterCeiling);
+            filterDurationMinInput.step = '1';
+            filterDurationMinInput.value = '0';
+
+            filterDurationMaxInput.min = '0';
+            filterDurationMaxInput.max = String(durationFilterCeiling);
+            filterDurationMaxInput.step = '1';
+            filterDurationMaxInput.value = String(durationFilterCeiling);
+            filterDurationMaxInput.placeholder = String(durationFilterCeiling);
+
+            minDurationMs = 0;
+            maxDurationMs = durationFilterCeiling;
+        }
+
+        function updateDurationFilter(changedInput) {
+            if (!filterDurationMinInput || !filterDurationMaxInput) {
+                minDurationMs = 0;
+                maxDurationMs = Number.POSITIVE_INFINITY;
+                return;
+            }
+
+            let minValue = filterDurationMinInput.value.trim() === ''
+                ? 0
+                : Number.parseInt(filterDurationMinInput.value, 10);
+            let maxValue = filterDurationMaxInput.value.trim() === ''
+                ? durationFilterCeiling
+                : Number.parseInt(filterDurationMaxInput.value, 10);
+
+            if (!Number.isFinite(minValue)) {
+                minValue = 0;
+            }
+
+            if (!Number.isFinite(maxValue)) {
+                maxValue = durationFilterCeiling;
+            }
+
+            minValue = Math.max(0, Math.min(durationFilterCeiling, minValue));
+            maxValue = Math.max(0, Math.min(durationFilterCeiling, maxValue));
+
+            if (changedInput === filterDurationMinInput && minValue > maxValue) {
+                maxValue = minValue;
+            } else if (changedInput === filterDurationMaxInput && maxValue < minValue) {
+                minValue = maxValue;
+            } else if (minValue > maxValue) {
+                maxValue = minValue;
+            }
+
+            filterDurationMinInput.value = String(minValue);
+            filterDurationMaxInput.value = String(maxValue);
+
+            minDurationMs = minValue;
+            maxDurationMs = maxValue;
+        }
+
+        function updateFilters(changedInput) {
             showMsbuildTargets = !filterMsbuildTargetsInput || filterMsbuildTargetsInput.checked;
             showMsbuildTasks = !filterMsbuildTasksInput || filterMsbuildTasksInput.checked;
             showTests = !filterTestsInput || filterTestsInput.checked;
+            updateDurationFilter(changedInput);
             layout = buildLayout();
 
             updateSearchStatus();
@@ -1289,21 +1418,37 @@ internal sealed class HtmlTraceExporter : ITraceExporter
         }
 
         if (filterMsbuildTargetsInput) {
-            filterMsbuildTargetsInput.addEventListener('change', updateFilters);
+            filterMsbuildTargetsInput.addEventListener('change', () => {
+                updateFilters();
+            });
         }
 
         if (filterMsbuildTasksInput) {
-            filterMsbuildTasksInput.addEventListener('change', updateFilters);
+            filterMsbuildTasksInput.addEventListener('change', () => {
+                updateFilters();
+            });
         }
 
         if (filterTestsInput) {
-            filterTestsInput.addEventListener('change', updateFilters);
+            filterTestsInput.addEventListener('change', () => {
+                updateFilters();
+            });
         }
 
-        showMsbuildTargets = !filterMsbuildTargetsInput || filterMsbuildTargetsInput.checked;
-        showMsbuildTasks = !filterMsbuildTasksInput || filterMsbuildTasksInput.checked;
-        showTests = !filterTestsInput || filterTestsInput.checked;
-        layout = buildLayout();
+        if (filterDurationMinInput) {
+            filterDurationMinInput.addEventListener('change', () => {
+                updateFilters(filterDurationMinInput);
+            });
+        }
+
+        if (filterDurationMaxInput) {
+            filterDurationMaxInput.addEventListener('change', () => {
+                updateFilters(filterDurationMaxInput);
+            });
+        }
+
+        initializeDurationFilter();
+        updateFilters();
         setDetailsPanelVisible(false);
 
         window.addEventListener('keydown', (e) => {
