@@ -214,7 +214,13 @@ internal sealed partial class TraceModel
         return span;
     }
 
-    public TraceSpan FindClosestParent(long jobId, DateTimeOffset startTime, DateTimeOffset endTime, string? preferredParentId = null)
+    public TraceSpan FindClosestParent(
+        long jobId,
+        DateTimeOffset startTime,
+        DateTimeOffset endTime,
+        string? preferredParentId = null,
+        Func<TraceSpan, bool>? candidateFilter = null,
+        bool allowFallbackToUnfilteredCandidates = true)
     {
         if (endTime < startTime)
             endTime = startTime;
@@ -228,6 +234,25 @@ internal sealed partial class TraceModel
                 span.StartTime <= startTime &&
                 span.EndTime >= endTime)
             .ToList();
+
+        if (candidateFilter is not null)
+        {
+            var filteredCandidates = candidates
+                .Where(candidateFilter)
+                .ToList();
+
+            if (allowFallbackToUnfilteredCandidates)
+            {
+                if (filteredCandidates.Count > 0)
+                {
+                    candidates = filteredCandidates;
+                }
+            }
+            else
+            {
+                candidates = filteredCandidates;
+            }
+        }
 
         if (preferredParentId is not null)
         {
@@ -445,8 +470,11 @@ internal sealed partial class TraceModel
                 continue;
             }
 
+            var projects = EnumerateNodes<StructuredProject>(build).ToList();
+            var projectTargetFrameworks = BuildProjectTargetFrameworkLookup(projects);
+
             var projectSpans = new Dictionary<StructuredProject, TraceSpan>();
-            foreach (var project in EnumerateNodes<StructuredProject>(build))
+            foreach (var project in projects)
             {
                 if (project.StartTime == default || project.EndTime == default)
                     continue;
@@ -456,9 +484,11 @@ internal sealed partial class TraceModel
                 if (projectEnd < projectStart)
                     projectEnd = projectStart;
 
+                projectTargetFrameworks.TryGetValue(project, out var projectTargetFramework);
+
                 var parentSpan = FindClosestParent(jobId.Value, projectStart, projectEnd);
                 var projectSpan = AddSpan(
-                    name: BuildProjectSpanName(project),
+                    name: BuildProjectSpanName(project, projectTargetFramework),
                     kind: "msbuild.project",
                     startTime: projectStart,
                     endTime: projectEnd,
@@ -472,7 +502,7 @@ internal sealed partial class TraceModel
                         ["project.file"] = project.ProjectFile,
                         ["project.configuration"] = project.Configuration,
                         ["project.platform"] = project.Platform,
-                        ["project.target_framework"] = project.TargetFramework,
+                        ["project.target_framework"] = projectTargetFramework,
                     });
 
                 foreach (var property in artifact.Hints.CustomProperties)
@@ -506,6 +536,9 @@ internal sealed partial class TraceModel
                 var parentId = parentSpan.Id;
 
                 var project = GetProjectNode(target);
+                var projectTargetFramework = project is not null && projectTargetFrameworks.TryGetValue(project, out var value)
+                    ? value
+                    : GetProjectTargetFramework(project);
                 if (project is not null && projectSpans.TryGetValue(project, out var projectSpan))
                 {
                     parentId = projectSpan.Id;
@@ -526,7 +559,7 @@ internal sealed partial class TraceModel
                         ["artifact.name"] = artifact.Artifact.Name,
                         ["binlog.file"] = file.Value,
                         ["project.file"] = project?.ProjectFile,
-                        ["project.target_framework"] = project?.TargetFramework,
+                        ["project.target_framework"] = projectTargetFramework,
                         ["target.succeeded"] = target.Succeeded,
                     });
 
@@ -537,6 +570,9 @@ internal sealed partial class TraceModel
 
                 foreach (var task in EnumerateNodes<StructuredTask>(target))
                 {
+                    if (!ReferenceEquals(GetTargetNode(task), target))
+                        continue;
+
                     if (string.Equals(task.Name, "CallTarget", StringComparison.OrdinalIgnoreCase))
                         continue;
 
@@ -556,7 +592,7 @@ internal sealed partial class TraceModel
                         ["artifact.name"] = artifact.Artifact.Name,
                         ["binlog.file"] = file.Value,
                         ["project.file"] = project?.ProjectFile,
-                        ["project.target_framework"] = project?.TargetFramework,
+                        ["project.target_framework"] = projectTargetFramework,
                         ["task.from_assembly"] = task.FromAssembly,
                     };
 
@@ -628,15 +664,119 @@ internal sealed partial class TraceModel
         return null;
     }
 
-    private static string BuildProjectSpanName(StructuredProject project)
+    private static StructuredTarget? GetTargetNode(StructuredTask task)
     {
+        foreach (var parent in task.GetParentChainIncludingThis())
+        {
+            if (parent is StructuredTarget target)
+                return target;
+        }
+
+        return null;
+    }
+
+    private static string BuildProjectSpanName(StructuredProject project, string? targetFramework)
+    {
+        string projectName;
         if (!string.IsNullOrWhiteSpace(project.Name))
-            return project.Name;
+        {
+            projectName = project.Name;
+        }
+        else if (!string.IsNullOrWhiteSpace(project.ProjectFile))
+        {
+            projectName = Path.GetFileName(project.ProjectFile);
+        }
+        else
+        {
+            projectName = "Project";
+        }
 
-        if (!string.IsNullOrWhiteSpace(project.ProjectFile))
-            return Path.GetFileName(project.ProjectFile);
+        if (string.IsNullOrWhiteSpace(targetFramework))
+            return projectName;
 
-        return "Project";
+        if (projectName.EndsWith($" ({targetFramework})", StringComparison.OrdinalIgnoreCase))
+            return projectName;
+
+        return $"{projectName} ({targetFramework})";
+    }
+
+    private static Dictionary<StructuredProject, string?> BuildProjectTargetFrameworkLookup(List<StructuredProject> projects)
+    {
+        var result = new Dictionary<StructuredProject, string?>();
+        foreach (var project in projects)
+        {
+            result[project] = GetProjectTargetFramework(project);
+        }
+
+        foreach (var projectGroup in projects
+                     .Where(static project => !string.IsNullOrWhiteSpace(project.ProjectFile))
+                     .GroupBy(static project => project.ProjectFile!, StringComparer.OrdinalIgnoreCase))
+        {
+            var mergedTargetFrameworks = MergeTargetFrameworkValues(projectGroup.Select(project => result[project]));
+            if (string.IsNullOrWhiteSpace(mergedTargetFrameworks))
+                continue;
+
+            foreach (var project in projectGroup)
+            {
+                if (!string.IsNullOrWhiteSpace(result[project]))
+                    continue;
+
+                result[project] = mergedTargetFrameworks;
+            }
+        }
+
+        return result;
+    }
+
+    private static string? MergeTargetFrameworkValues(IEnumerable<string?> targetFrameworkValues)
+    {
+        List<string> mergedValues = [];
+        HashSet<string> distinctValues = new(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var targetFrameworkValue in targetFrameworkValues)
+        {
+            if (string.IsNullOrWhiteSpace(targetFrameworkValue))
+                continue;
+
+            foreach (var targetFramework in targetFrameworkValue.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                if (distinctValues.Add(targetFramework))
+                {
+                    mergedValues.Add(targetFramework);
+                }
+            }
+        }
+
+        if (mergedValues.Count is 0)
+            return null;
+
+        return string.Join(';', mergedValues);
+    }
+
+    private static string? GetProjectTargetFramework(StructuredProject? project)
+    {
+        if (project is null)
+            return null;
+
+        if (!string.IsNullOrWhiteSpace(project.TargetFramework))
+            return project.TargetFramework;
+
+        if (project.GlobalProperties is null)
+            return null;
+
+        foreach (var globalPropertyName in new[] { "TargetFramework", "TargetFrameworks" })
+        {
+            foreach (var globalProperty in project.GlobalProperties)
+            {
+                if (!string.Equals(globalProperty.Key, globalPropertyName, StringComparison.OrdinalIgnoreCase))
+                    continue;
+
+                if (!string.IsNullOrWhiteSpace(globalProperty.Value))
+                    return globalProperty.Value;
+            }
+        }
+
+        return null;
     }
 
     private static string BuildMsBuildNodeName(string name, StructuredProject? project)
@@ -746,7 +886,12 @@ internal sealed partial class TraceModel
             if (start is null || end is null)
                 continue;
 
-            var parentSpan = FindClosestParent(jobId, start.Value, end.Value);
+            var parentSpan = FindClosestParent(
+                jobId,
+                start.Value,
+                end.Value,
+                candidateFilter: static span => span.Kind is "msbuild.task" or "step",
+                allowFallbackToUnfilteredCandidates: false);
 
             AddSpan(
                 name: BuildTestSpanName(result.Attribute("testName")?.Value),
@@ -813,7 +958,12 @@ internal sealed partial class TraceModel
                     _ => "passed",
                 };
 
-                var parentSpan = FindClosestParent(jobId, start, end);
+                var parentSpan = FindClosestParent(
+                    jobId,
+                    start,
+                    end,
+                    candidateFilter: static span => span.Kind is "msbuild.task" or "step",
+                    allowFallbackToUnfilteredCandidates: false);
 
                 AddSpan(
                     name: BuildTestSpanName(testName),

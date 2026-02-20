@@ -31,9 +31,7 @@ internal sealed class HtmlTraceExporter : ITraceExporter
 
     private static string BuildHtmlContent(TraceModel model)
     {
-        var spans = model.Spans
-            .OrderBy(static span => span.StartTime)
-            .ToList();
+        var spans = OrderSpansByHierarchy(model.Spans);
 
         var jobs = spans
             .Where(static span => span.Kind == "job")
@@ -87,6 +85,7 @@ internal sealed class HtmlTraceExporter : ITraceExporter
         html.AppendLine("            <label class=\"filter-option\" for=\"filter-msbuild-targets\"><input id=\"filter-msbuild-targets\" type=\"checkbox\" checked /> Show MSBuild Targets</label>");
         html.AppendLine("            <label class=\"filter-option\" for=\"filter-msbuild-tasks\"><input id=\"filter-msbuild-tasks\" type=\"checkbox\" checked /> Show MSBuild Tasks</label>");
         html.AppendLine("            <label class=\"filter-option\" for=\"filter-tests\"><input id=\"filter-tests\" type=\"checkbox\" checked /> Show Tests</label>");
+        html.AppendLine("            <label class=\"filter-option\" for=\"filter-tooltips\"><input id=\"filter-tooltips\" type=\"checkbox\" checked /> Show Tooltips</label>");
         html.AppendLine("        </div>");
         html.AppendLine("    </div>");
         html.AppendLine("    <div id=\"container\">");
@@ -115,6 +114,91 @@ internal sealed class HtmlTraceExporter : ITraceExporter
         html.AppendLine("</html>");
 
         return html.ToString();
+    }
+
+    private static List<TraceSpan> OrderSpansByHierarchy(IReadOnlyList<TraceSpan> spans)
+    {
+        var spansByStart = spans
+            .OrderBy(static span => span.StartTime)
+            .ThenBy(static span => span.Duration)
+            .ThenBy(static span => span.Id, StringComparer.Ordinal)
+            .ToList();
+
+        var spansById = spans
+            .ToDictionary(span => span.Id, StringComparer.Ordinal);
+
+        var childrenByParentId = new Dictionary<string, List<TraceSpan>>(StringComparer.Ordinal);
+        foreach (var span in spans)
+        {
+            if (string.IsNullOrEmpty(span.ParentId) || string.Equals(span.ParentId, span.Id, StringComparison.Ordinal))
+                continue;
+
+            if (!spansById.ContainsKey(span.ParentId))
+                continue;
+
+            if (!childrenByParentId.TryGetValue(span.ParentId, out var children))
+            {
+                children = [];
+                childrenByParentId[span.ParentId] = children;
+            }
+
+            children.Add(span);
+        }
+
+        foreach (var children in childrenByParentId.Values)
+        {
+            children.Sort(static (left, right) =>
+            {
+                var startComparison = left.StartTime.CompareTo(right.StartTime);
+                if (startComparison is not 0)
+                    return startComparison;
+
+                var durationComparison = left.Duration.CompareTo(right.Duration);
+                if (durationComparison is not 0)
+                    return durationComparison;
+
+                return string.Compare(left.Id, right.Id, StringComparison.Ordinal);
+            });
+        }
+
+        var orderedSpans = new List<TraceSpan>(spans.Count);
+        var processedSpanIds = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var rootSpan in spansByStart.Where(IsRootSpan))
+        {
+            Visit(rootSpan);
+        }
+
+        while (orderedSpans.Count < spans.Count)
+        {
+            var nextUnprocessedSpan = spansByStart.First(span => !processedSpanIds.Contains(span.Id));
+            Visit(nextUnprocessedSpan);
+        }
+
+        return orderedSpans;
+
+        bool IsRootSpan(TraceSpan span)
+        {
+            return string.IsNullOrEmpty(span.ParentId)
+                || string.Equals(span.ParentId, span.Id, StringComparison.Ordinal)
+                || !spansById.ContainsKey(span.ParentId);
+        }
+
+        void Visit(TraceSpan span)
+        {
+            if (!processedSpanIds.Add(span.Id))
+                return;
+
+            orderedSpans.Add(span);
+
+            if (!childrenByParentId.TryGetValue(span.Id, out var children))
+                return;
+
+            foreach (var child in children)
+            {
+                Visit(child);
+            }
+        }
     }
 
     private static string BuildSpansData(List<TraceSpan> spans, DateTimeOffset minTime, List<TraceSpan> jobs)
@@ -503,6 +587,7 @@ internal sealed class HtmlTraceExporter : ITraceExporter
         const filterMsbuildTargetsInput = document.getElementById('filter-msbuild-targets');
         const filterMsbuildTasksInput = document.getElementById('filter-msbuild-tasks');
         const filterTestsInput = document.getElementById('filter-tests');
+        const filterTooltipsInput = document.getElementById('filter-tooltips');
         const filterDurationMinInput = document.getElementById('filter-duration-min');
         const filterDurationMaxInput = document.getElementById('filter-duration-max');
 
@@ -535,6 +620,7 @@ internal sealed class HtmlTraceExporter : ITraceExporter
         let showMsbuildTargets = true;
         let showMsbuildTasks = true;
         let showTests = true;
+        let showTooltips = true;
         let minDurationMs = 0;
         let maxDurationMs = Number.POSITIVE_INFINITY;
         let durationFilterCeiling = 100;
@@ -655,24 +741,60 @@ internal sealed class HtmlTraceExporter : ITraceExporter
                 spansByLane.get(span.jobIndex).push(span);
             });
 
-            spansByLane.forEach((laneSpans, laneIndex) => {
-                laneSpans.sort((a, b) => {
-                    if (a.start !== b.start) {
-                        return a.start - b.start;
+            function getMinimumRowIndex(span, laneIndex) {
+                const visitedParentIds = new Set();
+                let currentParentId = span.parentId;
+
+                while (currentParentId !== null && currentParentId !== undefined && currentParentId !== 0) {
+                    if (visitedParentIds.has(currentParentId)) {
+                        break;
                     }
 
-                    return a.duration - b.duration;
-                });
+                    visitedParentIds.add(currentParentId);
 
+                    const parentRowIndex = spanRows.get(currentParentId);
+                    if (parentRowIndex !== undefined) {
+                        return parentRowIndex + 1;
+                    }
+
+                    const parentSpan = spansById.get(currentParentId);
+                    if (!parentSpan || parentSpan.jobIndex !== laneIndex) {
+                        break;
+                    }
+
+                    currentParentId = parentSpan.parentId;
+                }
+
+                return 0;
+            }
+
+            spansByLane.forEach((laneSpans, laneIndex) => {
                 const rowEndTimes = [];
                 const rowItemCounts = [];
                 laneSpans.forEach(span => {
                     const spanEnd = span.start + span.duration;
-                    let rowIndex = rowEndTimes.findIndex(endTime => span.start >= endTime);
+                    const minimumRowIndex = getMinimumRowIndex(span, laneIndex);
+                    let rowIndex = -1;
+
+                    for (let index = minimumRowIndex; index < rowEndTimes.length; index++) {
+                        if (span.start >= rowEndTimes[index]) {
+                            rowIndex = index;
+                            break;
+                        }
+                    }
 
                     if (rowIndex < 0) {
-                        rowIndex = rowEndTimes.length;
-                        rowEndTimes.push(spanEnd);
+                        rowIndex = Math.max(minimumRowIndex, rowEndTimes.length);
+
+                        while (rowEndTimes.length < rowIndex) {
+                            rowEndTimes.push(Number.NEGATIVE_INFINITY);
+                        }
+
+                        if (rowEndTimes.length === rowIndex) {
+                            rowEndTimes.push(spanEnd);
+                        } else {
+                            rowEndTimes[rowIndex] = spanEnd;
+                        }
                     } else {
                         rowEndTimes[rowIndex] = spanEnd;
                     }
@@ -1311,6 +1433,11 @@ internal sealed class HtmlTraceExporter : ITraceExporter
         }
 
         function showTooltip(span, mouseX, mouseY) {
+            if (!showTooltips) {
+                hideTooltip();
+                return;
+            }
+
             const spanStartUtc = minTime + span.start;
             const spanEndUtc = spanStartUtc + span.duration;
             const lines = [
@@ -1335,6 +1462,10 @@ internal sealed class HtmlTraceExporter : ITraceExporter
         }
 
         function positionTooltip(mouseX, mouseY) {
+            if (!showTooltips || tooltip.style.display === 'none') {
+                return;
+            }
+
             const tooltipOffset = 10;
             const viewportPadding = 8;
             const rect = tooltip.getBoundingClientRect();
@@ -1359,6 +1490,13 @@ internal sealed class HtmlTraceExporter : ITraceExporter
 
         function hideTooltip() {
             tooltip.style.display = 'none';
+        }
+
+        function updateTooltipPreference() {
+            showTooltips = !filterTooltipsInput || !!filterTooltipsInput.checked;
+            if (!showTooltips) {
+                hideTooltip();
+            }
         }
 
         canvas.addEventListener('wheel', (e) => {
@@ -1454,7 +1592,20 @@ internal sealed class HtmlTraceExporter : ITraceExporter
             const mouseY = e.clientY - rect.top;
             const span = getSpanAt(mouseX, mouseY);
 
-            if (!span || isResizingPanel) {
+            if (isResizingPanel) {
+                return;
+            }
+
+            if (!span) {
+                if (selectedSpan) {
+                    closeDetailsPanel();
+                }
+
+                return;
+            }
+
+            if (selectedSpan && selectedSpan.id === span.id) {
+                closeDetailsPanel();
                 return;
             }
 
@@ -1541,6 +1692,12 @@ internal sealed class HtmlTraceExporter : ITraceExporter
             });
         }
 
+        if (filterTooltipsInput) {
+            filterTooltipsInput.addEventListener('change', () => {
+                updateTooltipPreference();
+            });
+        }
+
         if (filterDurationMinInput) {
             filterDurationMinInput.addEventListener('change', () => {
                 updateFilters(filterDurationMinInput);
@@ -1554,6 +1711,7 @@ internal sealed class HtmlTraceExporter : ITraceExporter
         }
 
         initializeDurationFilter();
+        updateTooltipPreference();
         updateFilters();
         setDetailsPanelVisible(false);
 

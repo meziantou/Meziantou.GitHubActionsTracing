@@ -1,8 +1,10 @@
 using System.IO.Compression;
+using System.Reflection;
 using System.Text.Json;
 using Meziantou.Framework;
 using Meziantou.Framework.InlineSnapshotTesting;
 using Meziantou.GitHubActionsTracing.Exporters;
+using StructuredProject = Microsoft.Build.Logging.StructuredLogger.Project;
 
 [assembly: CollectionBehavior(DisableTestParallelization = true)]
 
@@ -521,10 +523,15 @@ public sealed class CliApplicationTests
         Assert.Contains("Show MSBuild Targets", fileContent, StringComparison.Ordinal);
         Assert.Contains("Show MSBuild Tasks", fileContent, StringComparison.Ordinal);
         Assert.Contains("Show Tests", fileContent, StringComparison.Ordinal);
+        Assert.Contains("Show Tooltips", fileContent, StringComparison.Ordinal);
         Assert.Contains("Duration (ms):", fileContent, StringComparison.Ordinal);
+        Assert.Contains("id=\"filter-tooltips\" type=\"checkbox\" checked", fileContent, StringComparison.Ordinal);
         Assert.Contains("id=\"filter-duration-min\" class=\"duration-number-input\" type=\"number\"", fileContent, StringComparison.Ordinal);
         Assert.Contains("id=\"filter-duration-max\" class=\"duration-number-input\" type=\"number\"", fileContent, StringComparison.Ordinal);
         Assert.Contains("function isSpanVisibleByFilters(span)", fileContent, StringComparison.Ordinal);
+        Assert.Contains("function getMinimumRowIndex(span, laneIndex)", fileContent, StringComparison.Ordinal);
+        Assert.Contains("const minimumRowIndex = getMinimumRowIndex(span, laneIndex);", fileContent, StringComparison.Ordinal);
+        Assert.Contains("return parentRowIndex + 1;", fileContent, StringComparison.Ordinal);
         Assert.Contains("span.kind === 'msbuild.target'", fileContent, StringComparison.Ordinal);
         Assert.Contains("span.kind === 'msbuild.task'", fileContent, StringComparison.Ordinal);
         Assert.Contains("span.kind === 'test'", fileContent, StringComparison.Ordinal);
@@ -533,6 +540,8 @@ public sealed class CliApplicationTests
         Assert.Contains("max-height: calc(100vh - 16px);", fileContent, StringComparison.Ordinal);
         Assert.Contains("overflow-wrap: anywhere;", fileContent, StringComparison.Ordinal);
         Assert.Contains("function positionTooltip(mouseX, mouseY)", fileContent, StringComparison.Ordinal);
+        Assert.Contains("if (!showTooltips)", fileContent, StringComparison.Ordinal);
+        Assert.Contains("function updateTooltipPreference()", fileContent, StringComparison.Ordinal);
         Assert.Contains("positionTooltip(e.clientX, e.clientY);", fileContent, StringComparison.Ordinal);
         Assert.Contains("const spansById = new Map();", fileContent, StringComparison.Ordinal);
         Assert.Contains("function updateSelectedSpanHierarchy()", fileContent, StringComparison.Ordinal);
@@ -555,6 +564,72 @@ public sealed class CliApplicationTests
         var workflowRunHtmlUrl = model.WorkflowRun.HtmlUrl;
         Assert.NotNull(workflowRunHtmlUrl);
         Assert.Contains(workflowRunHtmlUrl, fileContent, StringComparison.Ordinal);
+        Assert.DoesNotContain("laneSpans.sort((a, b) => {", fileContent, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void HtmlExporter_OrderSpansByHierarchy_VisitsChildrenBeforeNextRoot()
+    {
+        var origin = DateTimeOffset.Parse("2026-02-19T00:00:00Z", CultureInfo.InvariantCulture);
+        var spans = new List<TraceSpan>
+        {
+            new()
+            {
+                Id = "root-a",
+                Name = "Root A",
+                Kind = "step",
+                StartTime = origin,
+                EndTime = origin.AddSeconds(100),
+                JobId = 1,
+            },
+            new()
+            {
+                Id = "root-b",
+                Name = "Root B",
+                Kind = "step",
+                StartTime = origin.AddSeconds(10),
+                EndTime = origin.AddSeconds(20),
+                JobId = 1,
+            },
+            new()
+            {
+                Id = "child-a-late",
+                ParentId = "root-a",
+                Name = "Child A late",
+                Kind = "log.group",
+                StartTime = origin.AddSeconds(90),
+                EndTime = origin.AddSeconds(95),
+                JobId = 1,
+            },
+            new()
+            {
+                Id = "child-a-early",
+                ParentId = "root-a",
+                Name = "Child A early",
+                Kind = "log.group",
+                StartTime = origin.AddSeconds(80),
+                EndTime = origin.AddSeconds(81),
+                JobId = 1,
+            },
+            new()
+            {
+                Id = "child-b",
+                ParentId = "root-b",
+                Name = "Child B",
+                Kind = "log.group",
+                StartTime = origin.AddSeconds(11),
+                EndTime = origin.AddSeconds(12),
+                JobId = 1,
+            },
+        };
+
+        var method = typeof(HtmlTraceExporter).GetMethod("OrderSpansByHierarchy", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(method);
+
+        var orderedSpans = method.Invoke(null, [spans]);
+        var ordered = Assert.IsType<List<TraceSpan>>(orderedSpans);
+
+        Assert.Equal(["root-a", "child-a-early", "child-a-late", "root-b", "child-b"], ordered.Select(span => span.Id));
     }
 
     [Fact]
@@ -593,6 +668,54 @@ public sealed class CliApplicationTests
     }
 
     [Fact]
+    public async Task EmbeddedFixture_BinlogProjectSpanNames_IncludeTargetFrameworkWhenAvailable()
+    {
+        await using var temporaryDirectory = TemporaryDirectory.Create();
+        var model = LoadEmbeddedFixtureModel(temporaryDirectory);
+
+        var projectSpansWithTargetFramework = model.Spans
+            .Where(span => span.Kind is "msbuild.project")
+            .Select(span =>
+            {
+                span.Attributes.TryGetValue("project.target_framework", out var value);
+                return (Span: span, TargetFramework: value as string);
+            })
+            .Where(item => !string.IsNullOrWhiteSpace(item.TargetFramework))
+            .ToList();
+
+        Assert.NotEmpty(projectSpansWithTargetFramework);
+        Assert.All(projectSpansWithTargetFramework, item =>
+        {
+            Assert.EndsWith($" ({item.TargetFramework})", item.Span.Name, StringComparison.Ordinal);
+        });
+    }
+
+    [Fact]
+    public void BuildProjectSpanName_UsesAllTargetFrameworksFromGlobalProperties()
+    {
+        var project = new StructuredProject
+        {
+            Name = "MyProject.csproj",
+            GlobalProperties = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["TargetFrameworks"] = "netstandard2.0;net10.0",
+            },
+        };
+
+        var getProjectTargetFrameworkMethod = typeof(TraceModel).GetMethod("GetProjectTargetFramework", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(getProjectTargetFrameworkMethod);
+
+        var targetFramework = Assert.IsType<string>(getProjectTargetFrameworkMethod.Invoke(null, [project]));
+        Assert.Equal("netstandard2.0;net10.0", targetFramework);
+
+        var buildProjectSpanNameMethod = typeof(TraceModel).GetMethod("BuildProjectSpanName", BindingFlags.NonPublic | BindingFlags.Static);
+        Assert.NotNull(buildProjectSpanNameMethod);
+
+        var projectSpanName = Assert.IsType<string>(buildProjectSpanNameMethod.Invoke(null, [project, targetFramework]));
+        Assert.Equal("MyProject.csproj (netstandard2.0;net10.0)", projectSpanName);
+    }
+
+    [Fact]
     public async Task EmbeddedFixture_BinlogTaskParameters_AreAddedToTaskSpans()
     {
         await using var temporaryDirectory = TemporaryDirectory.Create();
@@ -627,6 +750,31 @@ public sealed class CliApplicationTests
             span.Attributes.TryGetValue("task.parameter.CommandLineArguments", out var value)
             && value is string commandLineArguments
             && !string.IsNullOrWhiteSpace(commandLineArguments));
+    }
+
+    [Fact]
+    public async Task EmbeddedFixture_CscTasks_AreNotDuplicated()
+    {
+        await using var temporaryDirectory = TemporaryDirectory.Create();
+        var model = LoadEmbeddedFixtureModel(temporaryDirectory);
+
+        var cscTaskSpans = model.Spans
+            .Where(span => span.Kind is "msbuild.task" && span.Name.StartsWith("Csc (", StringComparison.Ordinal))
+            .ToList();
+
+        Assert.NotEmpty(cscTaskSpans);
+
+        var duplicateGroups = cscTaskSpans
+            .GroupBy(span => (
+                Name: span.Name,
+                Start: span.StartTime,
+                End: span.EndTime,
+                ProjectFile: span.Attributes.TryGetValue("project.file", out var projectFile) ? projectFile as string : null),
+                EqualityComparer<(string Name, DateTimeOffset Start, DateTimeOffset End, string? ProjectFile)>.Default)
+            .Where(group => group.Count() > 1)
+            .ToList();
+
+        Assert.Empty(duplicateGroups);
     }
 
     [Fact]
@@ -678,6 +826,28 @@ public sealed class CliApplicationTests
 
         var testSpan = model.Spans.Single(span => span.Kind is "test");
         Assert.Equal(1001, testSpan.JobId);
+    }
+
+    [Fact]
+    public async Task Load_OverlappingTrxTests_AreAttachedToStepSpan()
+    {
+        await using var temporaryDirectory = TemporaryDirectory.Create();
+        var fixtureDirectory = temporaryDirectory / "fixture";
+        CreateRunInfoFixtureWithOverlappingTrxTests(fixtureDirectory);
+
+        var model = TraceModel.Load(fixtureDirectory, new TraceLoadOptions
+        {
+            IncludeTests = true,
+            MinimumTestDuration = TimeSpan.Zero,
+        });
+
+        var stepSpan = model.Spans.Single(span => span.Kind is "step");
+        var testSpans = model.Spans
+            .Where(span => span.Kind is "test")
+            .ToList();
+
+        Assert.Equal(2, testSpans.Count);
+        Assert.All(testSpans, span => Assert.Equal(stepSpan.Id, span.ParentId));
     }
 
     [Fact]
@@ -960,6 +1130,96 @@ public sealed class CliApplicationTests
                                             duration="00:00:01"
                                             startTime="2026-02-16T00:01:20.0000000Z"
                                             endTime="2026-02-16T00:01:21.0000000Z"
+                                            machineName="runner-1" />
+                          </Results>
+                        </TestRun>
+                        """);
+    }
+
+    private static void CreateRunInfoFixtureWithOverlappingTrxTests(FullPath fixtureDirectory)
+    {
+        var metadataDirectory = fixtureDirectory / "metadata";
+        var logsDirectory = fixtureDirectory / "logs" / "jobs";
+        var artifactDirectory = fixtureDirectory / "artifacts" / "5001-overlapping-tests" / "files";
+
+        Directory.CreateDirectory(metadataDirectory);
+        Directory.CreateDirectory(logsDirectory);
+        Directory.CreateDirectory(artifactDirectory);
+
+        File.WriteAllText(metadataDirectory / "run.json", """
+                        {
+                            "id": 42,
+                            "name": "Sample workflow",
+                            "created_at": "2026-02-16T00:00:00Z",
+                            "run_started_at": "2026-02-16T00:00:00Z",
+                            "updated_at": "2026-02-16T00:02:00Z"
+                        }
+                        """);
+
+        File.WriteAllText(metadataDirectory / "jobs.json", """
+                        {
+                            "jobs": [
+                                {
+                                    "id": 1001,
+                                    "run_id": 42,
+                                    "name": "test",
+                                    "status": "completed",
+                                    "conclusion": "success",
+                                    "created_at": "2026-02-16T00:00:00Z",
+                                    "started_at": "2026-02-16T00:00:00Z",
+                                    "completed_at": "2026-02-16T00:02:00Z",
+                                    "steps": [
+                                        {
+                                            "number": 1,
+                                            "name": "run tests",
+                                            "status": "completed",
+                                            "conclusion": "success",
+                                            "started_at": "2026-02-16T00:00:00Z",
+                                            "completed_at": "2026-02-16T00:02:00Z"
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                        """);
+
+        File.WriteAllText(metadataDirectory / "artifacts.json", """
+                        {
+                            "artifacts": [
+                                {
+                                    "id": 5001,
+                                    "name": "overlapping-tests",
+                                    "size_in_bytes": 1024,
+                                    "created_at": "2026-02-16T00:01:00Z",
+                                    "updated_at": "2026-02-16T00:01:00Z"
+                                }
+                            ]
+                        }
+                        """);
+
+        File.WriteAllText(logsDirectory / "1001.log", """
+                        2026-02-16T00:01:00.0000000Z ##[group]Run actions/upload-artifact@v6
+                        2026-02-16T00:01:00.0000100Z with:
+                        2026-02-16T00:01:00.0000200Z   name: overlapping-tests
+                        2026-02-16T00:01:00.0000300Z   path: ./artifacts/test-results/**/*.trx
+                        2026-02-16T00:01:00.0000400Z ##[endgroup]
+                        """);
+
+        File.WriteAllText(artifactDirectory / "results.trx", """
+                        <?xml version="1.0" encoding="utf-8"?>
+                        <TestRun>
+                          <Results>
+                            <UnitTestResult testName="SampleTests.First"
+                                            outcome="Passed"
+                                            duration="00:00:01"
+                                            startTime="2026-02-16T00:00:10.0000000Z"
+                                            endTime="2026-02-16T00:00:11.0000000Z"
+                                            machineName="runner-1" />
+                            <UnitTestResult testName="SampleTests.Second"
+                                            outcome="Passed"
+                                            duration="00:00:01"
+                                            startTime="2026-02-16T00:00:10.0000000Z"
+                                            endTime="2026-02-16T00:00:11.0000000Z"
                                             machineName="runner-1" />
                           </Results>
                         </TestRun>
