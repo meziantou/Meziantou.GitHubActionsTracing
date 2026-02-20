@@ -107,12 +107,12 @@ A workflow job URL resolves to the same workflow run and downloads the full run 
 
 ## Web API webhook receiver
 
-An application is available in [Meziantou.GitHubActionsTracing.WebApi/](Meziantou.GitHubActionsTracing.WebApi).
+An application is available in [Meziantou.GitHubActionsTracing.Server/](Meziantou.GitHubActionsTracing.Server).
 
 Run it from source:
 
 ```powershell
-dotnet run --project .\Meziantou.GitHubActionsTracing.WebApi\
+dotnet run --project .\Meziantou.GitHubActionsTracing.Server\
 ```
 
 The webhook endpoint is:
