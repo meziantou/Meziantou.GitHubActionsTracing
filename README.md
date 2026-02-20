@@ -33,12 +33,13 @@ Meziantou.GitHubActionsTracing export <workflow-run-url-or-folder> [options]
 
 Options:
 
-- `--format` selects one output format preset: `chromium`, `speedscope`, `otel`, `otel-file`.
+- `--format` selects one output format preset: `chromium`, `speedscope`, `html`, `otel`, `otel-file`.
 - `--otel-endpoint` exports to an OTLP endpoint.
 - `--otel-protocol` selects OTLP protocol (`grpc`, `http`, `http/protobuf`).
-- `--otel-path` / `--otel-file-path` writes OpenTelemetry data to a file.
+- `--otel-file-path` writes OpenTelemetry data to a file.
 - `--chromium-path` writes Chromium trace output to a file.
 - `--speedscope-path` writes Speedscope output to a file.
+- `--html-path` writes an HTML trace file with interactive swimlanes.
 - `--minimum-test-duration` filters out short test spans.
 - `--minimum-binlog-duration` / `--minimum-target-duration` filters out short binlog target spans.
 - `--include-binlog` includes binlog targets and tasks (default: `true`).
@@ -55,10 +56,11 @@ Meziantou.GitHubActionsTracing export https://github.com/OWNER/REPO/actions/runs
 Meziantou.GitHubActionsTracing export https://github.com/OWNER/REPO/actions/runs/123456 --otel-endpoint http://localhost:4317 --otel-protocol grpc
 Meziantou.GitHubActionsTracing export https://github.com/OWNER/REPO/actions/runs/123456 --otel-endpoint http://localhost:4317 --otel-protocol http
 Meziantou.GitHubActionsTracing export https://github.com/OWNER/REPO/actions/runs/123456 --otel-endpoint http://localhost:4317 --otel-protocol http/protobuf
-Meziantou.GitHubActionsTracing export https://github.com/OWNER/REPO/actions/runs/123456 --otel-path trace.otel.json
+Meziantou.GitHubActionsTracing export https://github.com/OWNER/REPO/actions/runs/123456 --otel-file-path trace.otel.json
 Meziantou.GitHubActionsTracing export https://github.com/OWNER/REPO/actions/runs/123456 --chromium-path trace.json
 Meziantou.GitHubActionsTracing export https://github.com/OWNER/REPO/actions/runs/123456 --speedscope-path trace.speedscope.json
-Meziantou.GitHubActionsTracing export https://github.com/OWNER/REPO/actions/runs/123456 --chromium-path trace.json --speedscope-path trace.speedscope.json --otel-path trace.otel.json
+Meziantou.GitHubActionsTracing export https://github.com/OWNER/REPO/actions/runs/123456 --html-path trace.html
+Meziantou.GitHubActionsTracing export https://github.com/OWNER/REPO/actions/runs/123456 --chromium-path trace.chromium.json --speedscope-path trace.speedscope.json --html-path trace.html --otel-file-path trace.otel.json
 ```
 
 ```bash
@@ -78,14 +80,16 @@ Meziantou.GitHubActionsTracing export https://github.com/OWNER/REPO/actions/runs
 
 Default output paths:
 
-- `trace-<runId>.json` for Chromium
+- `trace-<runId>.chromium.json` for Chromium
 - `trace-<runId>.otel.json` for OpenTelemetry
 - `trace-<runId>.speedscope.json` for Speedscope
+- `trace-<runId>.html` for HTML
 
 ```bash
 Meziantou.GitHubActionsTracing export https://github.com/OWNER/REPO/actions/runs/123456 --format otel-file
 Meziantou.GitHubActionsTracing export https://github.com/OWNER/REPO/actions/runs/123456 --format chromium
 Meziantou.GitHubActionsTracing export https://github.com/OWNER/REPO/actions/runs/123456 --format speedscope
+Meziantou.GitHubActionsTracing export https://github.com/OWNER/REPO/actions/runs/123456 --format html
 ```
 
 ```bash
