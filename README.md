@@ -115,6 +115,12 @@ Run it from source:
 dotnet run --project .\Meziantou.GitHubActionsTracing.Server\
 ```
 
+A Docker image is also available on GitHub Container Registry:
+
+```bash
+docker pull ghcr.io/meziantou/meziantou-git-hub-actions-tracing:latest
+```
+
 The webhook endpoint is:
 
 - `POST /webhooks/github`
