@@ -166,3 +166,7 @@ For environment variables, replace `:` with `__` (double underscore), for exampl
 - `GitHubActionsTracingWebhook__AllowedRepositoriesPatterns__0`
 
 OpenTelemetry exporter environment variables with the `EXPORTER_` prefix (for example `EXPORTER_OTEL_EXPORTER_OTLP_ENDPOINT`, `EXPORTER_OTEL_EXPORTER_OTLP_PROTOCOL`, `EXPORTER_OTEL_SERVICE_NAME`) are still supported by the exporter pipeline.
+
+# HTML exporter
+
+![Sample HTML output](docs/exporter-html-example.png)
