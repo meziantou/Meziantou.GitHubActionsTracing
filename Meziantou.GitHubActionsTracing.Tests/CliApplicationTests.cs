@@ -6,8 +6,6 @@ using Meziantou.Framework.InlineSnapshotTesting;
 using Meziantou.GitHubActionsTracing.Exporters;
 using StructuredProject = Microsoft.Build.Logging.StructuredLogger.Project;
 
-[assembly: CollectionBehavior(DisableTestParallelization = true)]
-
 namespace Meziantou.GitHubActionsTracing.Tests;
 
 public sealed class CliApplicationTests

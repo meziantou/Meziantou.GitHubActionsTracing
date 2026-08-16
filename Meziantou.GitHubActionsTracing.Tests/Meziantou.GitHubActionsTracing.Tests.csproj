@@ -1,11 +1,11 @@
 <Project Sdk="Meziantou.NET.Sdk.Test">
 
+  <PropertyGroup>
+    <!-- The tests share the console, so they must not run in parallel -->
+    <XunitParallelizationMode>None</XunitParallelizationMode>
+  </PropertyGroup>
+
   <ItemGroup>
-    <PackageReference Include="xunit.v3" Version="3.2.2" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5">
-      <PrivateAssets>all</PrivateAssets>
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-    </PackageReference>
     <PackageReference Include="Meziantou.Framework.InlineSnapshotTesting" Version="3.3.37" />
   </ItemGroup>
 
