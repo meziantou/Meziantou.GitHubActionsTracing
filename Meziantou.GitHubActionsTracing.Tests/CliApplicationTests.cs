@@ -137,7 +137,7 @@ public sealed class CliApplicationTests
                 allowedRepositoriesExact: [],
                 allowedRepositoriesPatterns: ["("]));
 
-        Assert.Contains("Invalid repository pattern", exception.Message, StringComparison.Ordinal);
+        Assert.Contains("Invalid repository pattern", exception.Message);
     }
 
     [Fact]
@@ -154,7 +154,7 @@ public sealed class CliApplicationTests
         Assert.True(File.Exists(outputPath));
 
         var traceContent = await File.ReadAllTextAsync(outputPath, TestContext.Current.CancellationToken);
-        Assert.Contains("GitHub Actions Workflow Run", traceContent, StringComparison.Ordinal);
+        Assert.Contains("GitHub Actions Workflow Run", traceContent);
     }
 
     [Fact]
@@ -182,7 +182,7 @@ public sealed class CliApplicationTests
         Assert.True(File.Exists(outputPath));
 
         var traceContent = await File.ReadAllTextAsync(outputPath, TestContext.Current.CancellationToken);
-        Assert.Contains("GitHub Actions Workflow Run", traceContent, StringComparison.Ordinal);
+        Assert.Contains("GitHub Actions Workflow Run", traceContent);
     }
 
     [Fact]
@@ -355,7 +355,7 @@ public sealed class CliApplicationTests
 
         var rootHelpSpanName = rootHelpSpan.GetProperty("name").GetString();
         Assert.NotNull(rootHelpSpanName);
-        Assert.EndsWith("Root_Help_MatchesSnapshot", rootHelpSpanName, StringComparison.Ordinal);
+        Assert.EndsWith("Root_Help_MatchesSnapshot", rootHelpSpanName);
 
         var rootHelpHierarchyKinds = GetSpanHierarchyKinds(rootHelpSpan, spansById);
         Assert.True(ContainsOrderedSubsequence(rootHelpHierarchyKinds, expectedHierarchy),
@@ -392,7 +392,7 @@ public sealed class CliApplicationTests
             "otel");
 
         Assert.Equal(0, commandResult.ExitCode);
-        Assert.DoesNotContain("invalid://not-used", commandResult.Output, StringComparison.Ordinal);
+        Assert.DoesNotContain("invalid://not-used", commandResult.Output);
     }
 
     [Fact]
@@ -407,7 +407,7 @@ public sealed class CliApplicationTests
         Assert.True(File.Exists(outputPath));
 
         var fileContent = await File.ReadAllTextAsync(outputPath, TestContext.Current.CancellationToken);
-        Assert.Contains("GitHub Actions Workflow Run", fileContent, StringComparison.Ordinal);
+        Assert.Contains("GitHub Actions Workflow Run", fileContent);
 
         using var document = JsonDocument.Parse(fileContent);
         var traceEvents = GetTraceEvents(document.RootElement);
@@ -417,7 +417,7 @@ public sealed class CliApplicationTests
             .Where(IsChromiumCompleteEvent)
             .ToList();
 
-        Assert.Equal(model.Spans.Count, completeEvents.Count);
+        Assert.HasCount(model.Spans.Count, completeEvents);
 
         var exportedKinds = completeEvents
             .Select(evt => GetJsonString(evt, "cat", "category"))
@@ -426,7 +426,7 @@ public sealed class CliApplicationTests
 
         foreach (var kind in model.Spans.Select(span => span.Kind).Distinct(StringComparer.Ordinal))
         {
-            Assert.True(exportedKinds.Contains(kind), $"Missing Chromium event category '{kind}'");
+            Assert.Contains(kind, exportedKinds, $"Missing Chromium event category '{kind}'");
         }
 
         Assert.Contains(completeEvents, evt => GetJsonInt32(evt, "tid", "threadId") is 1);
@@ -463,7 +463,7 @@ public sealed class CliApplicationTests
 
         var profiles = root.GetProperty("profiles").EnumerateArray().ToList();
         var expectedProfileCount = model.Spans.Count(span => span.Kind is "job");
-        Assert.Equal(expectedProfileCount, profiles.Count);
+        Assert.HasCount(expectedProfileCount, profiles);
 
         foreach (var profile in profiles)
         {
@@ -512,57 +512,57 @@ public sealed class CliApplicationTests
         Assert.True(File.Exists(outputPath));
 
         var fileContent = await File.ReadAllTextAsync(outputPath, TestContext.Current.CancellationToken);
-        Assert.Contains("if (e.ctrlKey || e.metaKey)", fileContent, StringComparison.Ordinal);
-        Assert.Contains("panX -= horizontalDelta;", fileContent, StringComparison.Ordinal);
-        Assert.Contains("panY -= verticalDelta;", fileContent, StringComparison.Ordinal);
-        Assert.Contains("function clampPan()", fileContent, StringComparison.Ordinal);
-        Assert.Contains("const minPanX = timelineWidth - dataWidth;", fileContent, StringComparison.Ordinal);
-        Assert.Contains("const minPanY = viewportLaneHeight - dataHeight;", fileContent, StringComparison.Ordinal);
-        Assert.Contains("Show MSBuild Targets", fileContent, StringComparison.Ordinal);
-        Assert.Contains("Show MSBuild Tasks", fileContent, StringComparison.Ordinal);
-        Assert.Contains("Show Tests", fileContent, StringComparison.Ordinal);
-        Assert.Contains("Show Tooltips", fileContent, StringComparison.Ordinal);
-        Assert.Contains("Duration (ms):", fileContent, StringComparison.Ordinal);
-        Assert.Contains("id=\"filter-tooltips\" type=\"checkbox\" checked", fileContent, StringComparison.Ordinal);
-        Assert.Contains("id=\"filter-duration-min\" class=\"duration-number-input\" type=\"number\"", fileContent, StringComparison.Ordinal);
-        Assert.Contains("id=\"filter-duration-max\" class=\"duration-number-input\" type=\"number\"", fileContent, StringComparison.Ordinal);
-        Assert.Contains("function isSpanVisibleByFilters(span)", fileContent, StringComparison.Ordinal);
-        Assert.Contains("function getMinimumRowIndex(span, laneIndex)", fileContent, StringComparison.Ordinal);
-        Assert.Contains("const minimumRowIndex = getMinimumRowIndex(span, laneIndex);", fileContent, StringComparison.Ordinal);
-        Assert.Contains("return parentRowIndex + 1;", fileContent, StringComparison.Ordinal);
-        Assert.Contains("span.kind === 'msbuild.target'", fileContent, StringComparison.Ordinal);
-        Assert.Contains("span.kind === 'msbuild.task'", fileContent, StringComparison.Ordinal);
-        Assert.Contains("span.kind === 'test'", fileContent, StringComparison.Ordinal);
-        Assert.Contains("function updateDurationFilter(changedInput)", fileContent, StringComparison.Ordinal);
-        Assert.Contains("span.duration < minDurationMs || span.duration > maxDurationMs", fileContent, StringComparison.Ordinal);
-        Assert.Contains("max-height: calc(100vh - 16px);", fileContent, StringComparison.Ordinal);
-        Assert.Contains("overflow-wrap: anywhere;", fileContent, StringComparison.Ordinal);
-        Assert.Contains("function positionTooltip(mouseX, mouseY)", fileContent, StringComparison.Ordinal);
-        Assert.Contains("if (!showTooltips)", fileContent, StringComparison.Ordinal);
-        Assert.Contains("function updateTooltipPreference()", fileContent, StringComparison.Ordinal);
-        Assert.Contains("positionTooltip(e.clientX, e.clientY);", fileContent, StringComparison.Ordinal);
-        Assert.Contains("const spansById = new Map();", fileContent, StringComparison.Ordinal);
-        Assert.Contains("function updateSelectedSpanHierarchy()", fileContent, StringComparison.Ordinal);
-        Assert.Contains("function getSelectedSpanRelation(span)", fileContent, StringComparison.Ordinal);
-        Assert.Contains("relation === 'ancestor'", fileContent, StringComparison.Ordinal);
-        Assert.Contains("relation === 'descendant'", fileContent, StringComparison.Ordinal);
-        Assert.Contains("function getSpanHierarchy(span)", fileContent, StringComparison.Ordinal);
-        Assert.Contains("function formatUtcTimestamp(epochMilliseconds)", fileContent, StringComparison.Ordinal);
-        Assert.Contains("tooltip-label'>Hierarchy:</span>", fileContent, StringComparison.Ordinal);
-        Assert.Contains("tooltip-label'>Start time (UTC):</span>", fileContent, StringComparison.Ordinal);
-        Assert.Contains("tooltip-label'>End time (UTC):</span>", fileContent, StringComparison.Ordinal);
-        Assert.Contains("id=\"details-panel\"", fileContent, StringComparison.Ordinal);
-        Assert.Contains("id=\"details-panel-resizer\"", fileContent, StringComparison.Ordinal);
-        Assert.Contains("id=\"details-panel-content\"", fileContent, StringComparison.Ordinal);
-        Assert.Contains("openDetailsPanel(span);", fileContent, StringComparison.Ordinal);
-        Assert.Contains("canvas.addEventListener('click'", fileContent, StringComparison.Ordinal);
-        Assert.Contains("navigator.clipboard.writeText", fileContent, StringComparison.Ordinal);
-        Assert.Contains("user-select: text;", fileContent, StringComparison.Ordinal);
-        Assert.Contains("View run on GitHub", fileContent, StringComparison.Ordinal);
+        Assert.Contains("if (e.ctrlKey || e.metaKey)", fileContent);
+        Assert.Contains("panX -= horizontalDelta;", fileContent);
+        Assert.Contains("panY -= verticalDelta;", fileContent);
+        Assert.Contains("function clampPan()", fileContent);
+        Assert.Contains("const minPanX = timelineWidth - dataWidth;", fileContent);
+        Assert.Contains("const minPanY = viewportLaneHeight - dataHeight;", fileContent);
+        Assert.Contains("Show MSBuild Targets", fileContent);
+        Assert.Contains("Show MSBuild Tasks", fileContent);
+        Assert.Contains("Show Tests", fileContent);
+        Assert.Contains("Show Tooltips", fileContent);
+        Assert.Contains("Duration (ms):", fileContent);
+        Assert.Contains("id=\"filter-tooltips\" type=\"checkbox\" checked", fileContent);
+        Assert.Contains("id=\"filter-duration-min\" class=\"duration-number-input\" type=\"number\"", fileContent);
+        Assert.Contains("id=\"filter-duration-max\" class=\"duration-number-input\" type=\"number\"", fileContent);
+        Assert.Contains("function isSpanVisibleByFilters(span)", fileContent);
+        Assert.Contains("function getMinimumRowIndex(span, laneIndex)", fileContent);
+        Assert.Contains("const minimumRowIndex = getMinimumRowIndex(span, laneIndex);", fileContent);
+        Assert.Contains("return parentRowIndex + 1;", fileContent);
+        Assert.Contains("span.kind === 'msbuild.target'", fileContent);
+        Assert.Contains("span.kind === 'msbuild.task'", fileContent);
+        Assert.Contains("span.kind === 'test'", fileContent);
+        Assert.Contains("function updateDurationFilter(changedInput)", fileContent);
+        Assert.Contains("span.duration < minDurationMs || span.duration > maxDurationMs", fileContent);
+        Assert.Contains("max-height: calc(100vh - 16px);", fileContent);
+        Assert.Contains("overflow-wrap: anywhere;", fileContent);
+        Assert.Contains("function positionTooltip(mouseX, mouseY)", fileContent);
+        Assert.Contains("if (!showTooltips)", fileContent);
+        Assert.Contains("function updateTooltipPreference()", fileContent);
+        Assert.Contains("positionTooltip(e.clientX, e.clientY);", fileContent);
+        Assert.Contains("const spansById = new Map();", fileContent);
+        Assert.Contains("function updateSelectedSpanHierarchy()", fileContent);
+        Assert.Contains("function getSelectedSpanRelation(span)", fileContent);
+        Assert.Contains("relation === 'ancestor'", fileContent);
+        Assert.Contains("relation === 'descendant'", fileContent);
+        Assert.Contains("function getSpanHierarchy(span)", fileContent);
+        Assert.Contains("function formatUtcTimestamp(epochMilliseconds)", fileContent);
+        Assert.Contains("tooltip-label'>Hierarchy:</span>", fileContent);
+        Assert.Contains("tooltip-label'>Start time (UTC):</span>", fileContent);
+        Assert.Contains("tooltip-label'>End time (UTC):</span>", fileContent);
+        Assert.Contains("id=\"details-panel\"", fileContent);
+        Assert.Contains("id=\"details-panel-resizer\"", fileContent);
+        Assert.Contains("id=\"details-panel-content\"", fileContent);
+        Assert.Contains("openDetailsPanel(span);", fileContent);
+        Assert.Contains("canvas.addEventListener('click'", fileContent);
+        Assert.Contains("navigator.clipboard.writeText", fileContent);
+        Assert.Contains("user-select: text;", fileContent);
+        Assert.Contains("View run on GitHub", fileContent);
         var workflowRunHtmlUrl = model.WorkflowRun.HtmlUrl;
         Assert.NotNull(workflowRunHtmlUrl);
-        Assert.Contains(workflowRunHtmlUrl, fileContent, StringComparison.Ordinal);
-        Assert.DoesNotContain("laneSpans.sort((a, b) => {", fileContent, StringComparison.Ordinal);
+        Assert.Contains(workflowRunHtmlUrl, fileContent);
+        Assert.DoesNotContain("laneSpans.sort((a, b) => {", fileContent);
     }
 
     [Fact]
@@ -684,7 +684,7 @@ public sealed class CliApplicationTests
         Assert.NotEmpty(projectSpansWithTargetFramework);
         Assert.All(projectSpansWithTargetFramework, item =>
         {
-            Assert.EndsWith($" ({item.TargetFramework})", item.Span.Name, StringComparison.Ordinal);
+            Assert.EndsWith($" ({item.TargetFramework})", item.Span.Name);
         });
     }
 
@@ -793,8 +793,8 @@ public sealed class CliApplicationTests
             .Where(span => span.Kind is "log.group")
             .ToList();
 
-        Assert.Equal(2, steps.Count);
-        Assert.Equal(2, groups.Count);
+        Assert.HasCount(2, steps);
+        Assert.HasCount(2, groups);
 
         var firstStep = steps[0];
         var secondStep = steps[1];
@@ -844,7 +844,7 @@ public sealed class CliApplicationTests
             .Where(span => span.Kind is "test")
             .ToList();
 
-        Assert.Equal(2, testSpans.Count);
+        Assert.HasCount(2, testSpans);
         Assert.All(testSpans, span => Assert.Equal(stepSpan.Id, span.ParentId));
     }
 
@@ -860,7 +860,7 @@ public sealed class CliApplicationTests
         var stepSpan = model.Spans.Single(span => span.Kind is "step");
         var events = stepSpan.Events;
 
-        Assert.Equal(6, events.Count);
+        Assert.HasCount(6, events);
 
         Assert.Contains(events, traceEvent =>
             traceEvent.Name is "warning"
