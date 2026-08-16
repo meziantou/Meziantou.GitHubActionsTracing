@@ -1554,18 +1554,18 @@ internal sealed partial class TraceModel
         return null;
     }
 
-    [GeneratedRegex(@"^::(?<level>notice|warning|error)(?<props>[^:]*)::(?<message>.*)$", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"^::(?<level>notice|warning|error)(?<props>[^:]*)::(?<message>.*)$", RegexOptions.IgnoreCase, matchTimeoutMilliseconds: -1)]
     private static partial Regex AnnotationRegex { get; }
 
-    [GeneratedRegex(@"^\s*##\[(?<level>notice|warning|error)\](?<message>.*)$", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"^\s*##\[(?<level>notice|warning|error)\](?<message>.*)$", RegexOptions.IgnoreCase, matchTimeoutMilliseconds: -1)]
     private static partial Regex LegacyAnnotationRegex { get; }
 
-    [GeneratedRegex(@"\x1B\[(?<codes>[0-9;]*)m")]
+    [GeneratedRegex(@"\x1B\[(?<codes>[0-9;]*)m", RegexOptions.None, matchTimeoutMilliseconds: -1)]
     private static partial Regex AnsiSgrRegex { get; }
 
-    [GeneratedRegex(@"\x1B\[[0-?]*[ -/]*[@-~]")]
+    [GeneratedRegex(@"\x1B\[[0-?]*[ -/]*[@-~]", RegexOptions.None, matchTimeoutMilliseconds: -1)]
     private static partial Regex AnsiEscapeRegex { get; }
 
-    [GeneratedRegex(@"^(?<ts>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)\s(?<msg>.*)$")]
+    [GeneratedRegex(@"^(?<ts>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)\s(?<msg>.*)$", RegexOptions.None, matchTimeoutMilliseconds: -1)]
     private static partial Regex LogTimestampRegex { get; }
 }
